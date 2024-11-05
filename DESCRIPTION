@@ -1,0 +1,25 @@
+Package: MACanalyzeR
+Type: Package
+Title: Tool for Single Cell analysis of Macrophages
+Version: 1.0.0
+Author: Andrea Ninni - PhD student
+Maintainer: <andrea.ninni@uniroma2.it>
+Description: A tool that perform macrophages characterization in scRNAseq data
+License: tSNEland
+Encoding: UTF-8
+LazyData: true
+Imports:
+    methods,
+    utils,
+    stats,
+    ggplot2,
+    ggpubr,
+    gridExtra,
+    pheatmap,
+    grDevices,
+    caret,
+    randomForest
+Suggests: 
+    knitr,
+    rmarkdown
+
