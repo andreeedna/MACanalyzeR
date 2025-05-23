@@ -1,4 +1,4 @@
-MitoScanneR <- function(mac_obj, meta=mac@ident){
+MitoScanneR <- function(mac_obj, meta=mac_obj@ident){
   if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
   Create it with CreateMacObj() function.")
 
@@ -70,7 +70,7 @@ MitoScanneR <- function(mac_obj, meta=mac@ident){
   return(mac_obj)
 }
 
-HeatMito <- function(mac_obj, plot.by=mac@ident, col=c("blue","white","red"), txt.size=10){
+HeatMito <- function(mac_obj, plot.by=mac_obj@ident, col=c("blue","white","red"), txt.size=10){
   if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
   Create it with CreateMacObj() function.")
   if (length(mac_obj@MitoScanneR[[plot.by]])==0) stop("Before HeatMito() run the MitoScanneR(mac_obj, meta='",plot.by,"') function")
