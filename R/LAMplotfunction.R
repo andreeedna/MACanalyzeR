@@ -1,112 +1,50 @@
-FoamPlot <- function(mac_obj, txt.size=14, shade="viridis", split.by=NULL, pt.size=2, ncol=3){
-  if (class(mac_obj)!="MACanalyzeR"){
-    stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
+#' Foam Cell Density Plot
+#'
+#' @param object A Seurat object
+#' @param group.by Metadata column for coloring (default: from CreateMacObj)
+#' @param split.by Metadata column for facetting
+#' @param base.size Font size
+#' @param fill Use fill for density
+#' @param alpha Alpha for fill
+#' @param cols Custom colors
+#' @param ncol Columns for facetting
+#' @import ggplot2
+#' @export
+FoamLine <- function(object, group.by = NULL, split.by = NULL, base.size = 14, fill = TRUE, alpha = 0.5, cols = NULL, ncol = 3) {
+  if (!inherits(object, "Seurat")) {
+    stop("Input must be a Seurat object")
   }
 
-  if (is.null(mac_obj@MetaData$`fMAC+`)){
-    stop("FoamSpotteR prediction is absent. Please, before run FoamSpotteR() function")
+  if (is.null(group.by)) {
+    group.by <- object@misc$MACanalyzeR$ident
+  }
+
+  if (is.null(object$Foam_fMAC.)) {
+    stop("FoamSpotteR prediction not found. Run 'FoamSpotteR' first.")
+  }
+
+  dfplot <- object@meta.data
+
+  p <- ggplot(dfplot, aes(x = Foam_fMAC., color = .data[[group.by]])) +
+    labs(x = "FoamDEX", y = 'Density', fill = group.by, color = group.by) +
+    xlim(0, 1) +
+    theme_classic(base_size = base.size)
+
+  if (fill) {
+    p <- p + geom_density(aes(fill = .data[[group.by]]), alpha = alpha)
+  } else {
+    p <- p + geom_density()
+  }
+
+  if (!is.null(cols)) {
+    p <- p + scale_fill_manual(values = cols) + scale_color_manual(values = cols)
   }
 
   if (!is.null(split.by)) {
-    if (!split.by %in% colnames(mac_obj@MetaData)) {
-      if (split.by == "Mac") {
-        stop("MacPolarizeR prediction is absent. Please, before run MacPolarizeR() function")
-      } else {
-        stop("split.by must be in colnames(mac_obj@MetaData)")
-      }
-    }
+    p <- p + facet_wrap(vars(.data[[split.by]]), ncol = ncol)
   }
 
-  dfplot <- cbind(mac_obj@MetaData, mac_obj@Reduction)
-  dfplot <- dfplot[order(dfplot$`fMAC+`, decreasing = F),]
-  lab <- colnames(dfplot)
-
-  plot <- ggplot(dfplot, aes(x=dfplot[,ncol(dfplot)-1], y=dfplot[,ncol(dfplot)], color=`fMAC+`))+
-    labs(x = lab[ncol(dfplot)-1], y=lab[ncol(dfplot)], color="FoamDEX") +
-    geom_point(size=pt.size) +
-    theme(text = element_text(size = txt.size),
-          panel.background = element_blank(),
-          axis.text.x = element_text(color = "black"),
-          axis.text.y = element_text(color = "black"),
-          axis.line = element_line(),
-          strip.background = element_rect(color = "black")) +
-    scale_color_viridis_c(option = shade)
-
-  if(!is.null(split.by)) {
-    plot <- plot +
-      facet_wrap(split.by, ncol = ncol)
-  }
-
-  return(plot)
-}
-
-
-###################################
-
-FoamLine <- function(mac_obj, plot.by=mac_obj@ident, split.by=NULL, txt.size=14, fill=T, a=0.5, col=NULL, ncol=3){
-  if (class(mac_obj)!="MACanalyzeR"){
-    stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
-  }
-
-  if (is.null(mac_obj@MetaData$`fMAC+`)){
-    stop("FoamSpotteR prediction is absent. Please, before run FoamSpotteR() function")
-  }
-
-  if (!plot.by %in% colnames(mac_obj@MetaData)) {
-    if (plot.by == "Mac") {
-      stop("MacPolarizeR prediction is absent. Please, before run MacPolarizeR() function")
-    } else {
-      stop("plot.by must be in colnames(mac_obj@MetaData)")
-    }
-  }
-
-  if(!is.null(split.by)){
-    if (is.null(mac_obj@MetaData[,split.by])) {
-      if (split.by == "Mac") {
-        stop("MacPolarizeR prediction is absent. Please, before run MacPolarizeR() function")
-      } else if (split.by == "Foam"){
-        stop("FoamFinder prediction is absent. Please, before run FoamSpotteR() function")
-      } else {
-        stop("split.by must be in colnames(mac_obj@MetaData")
-      }
-    }
-  }
-
-  dfplot <- mac_obj@MetaData
-  lab <- colnames(dfplot)
-
-  plot <- ggplot(dfplot, aes(x=`fMAC+`, color=dfplot[,plot.by]))+
-    labs(x = "FoamDEX", y='', fill=plot.by, color=plot.by) +
-    xlim(0,1) +
-    theme(text = element_text(size = txt.size),
-          panel.background = element_blank(),
-          axis.text.x = element_text(color = "black"),
-          axis.text.y = element_text(color = "black"),
-          axis.line = element_line(),
-          strip.background = element_rect(color = "black"))
-
-  if (fill) {
-    plot <- plot + geom_density(aes(y = after_stat(scaled), fill=dfplot[,plot.by]), alpha=a)
-  } else {
-    plot <- plot + geom_density(aes(y = after_stat(scaled)))
-  }
-
-  if (!is.null(col)) {
-    if (length(col) == length(unique(dfplot[,plot.by]))) {
-      plot <- plot + scale_fill_manual(values = col) + scale_color_manual(values = col)
-    } else {
-      stop("Number of color must correspond number of ", plot.by, " : ",length(unique(dfplot[,1])))
-    }
-  }
-
-  if(!is.null(split.by)) {
-    plot <- plot +
-      facet_wrap(split.by, ncol = ncol)
-  }
-
-  return(plot)
+  return(p)
 }
 
 

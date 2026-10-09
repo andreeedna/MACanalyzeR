@@ -1,256 +1,313 @@
-MitoScanneR <- function(mac_obj, meta=mac_obj@ident){
-  if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
-
-  if (is.null(mac_obj@MetaData[[meta]])) {
-    if (meta == "MAC") {
-      stop("MacPolarizeR prediction is absent. Please, before run MacPolarizeR() function")
-    } else if (meta == "Foam"){
-      stop("LAMFinder prediction is absent. Please, before run LAMFindeR() function")
-    } else {
-      stop("meta must be Sample, Cluster, MAC or Foam")
-    }
+#' Mitochondrial Scanning for Macrophages
+#'
+#' @param object A Seurat object
+#' @param group.by Metadata column for grouping (default: from CreateMacObj)
+#' @param assay Assay to use (default: DefaultAssay(object))
+#' @param layer Layer to use (default: "data")
+#' @return A Seurat object with mitochondrial scores
+#' @importFrom stats weighted.mean var
+#' @importFrom future.apply future_lapply
+#' @importFrom Seurat GetAssayData DefaultAssay
+#' @export
+MitoScanneR <- function(object, group.by = NULL, assay = NULL, layer = "data") {
+  if (!inherits(object, "Seurat")) {
+    stop("Input must be a Seurat object")
   }
 
-  check.cols <- function(vect){
-    for (x in vect) {
-      if (x < 0.001) {
-        return(FALSE)
-      }
-    }
-    return(TRUE)
+  mac_info <- object@misc$MACanalyzeR
+  if (is.null(mac_info)) {
+    stop("MACanalyzeR object not initialized. Please run 'CreateMacObj' first")
   }
 
-  if (mac_obj@organism=="mm") MitoPath <- MACanalyzeR::mouse_MitoCarta
-  else MitoPath <- MACanalyzeR::human_MitoCarta
+  if (is.null(group.by)) {
+    group.by <- mac_info$ident
+  }
+  if (is.null(object@meta.data[[group.by]])) {
+    stop("Metadata column '", group.by, "' not found")
+  }
+
+  if (mac_info$organism == "mm") {
+    MitoPath <- MACanalyzeR::mouse_MitoCarta
+  } else {
+    MitoPath <- MACanalyzeR::human_MitoCarta
+  }
+
+  if (is.null(assay)) {
+    assay <- Seurat::DefaultAssay(object)
+  }
+  mtx <- Seurat::GetAssayData(object, assay = assay, layer = layer)
+  cond_tot <- object@meta.data[[group.by]]
+  cond <- unique(cond_tot)
+
+  check.cols <- function(vect) {
+    all(vect >= 0.001)
+  }
+
+  score_mito <- function(p_name, category_pathways) {
+    genes <- category_pathways[[p_name]]
+    genes <- intersect(genes, rownames(mtx))
+    if (length(genes) < 5) {
+      return(NULL)
+    }
+
+    mtx_pathway <- mtx[genes, , drop = FALSE]
+    mtx_pathway <- mtx_pathway[Matrix::rowSums(mtx_pathway) > 0, , drop = FALSE]
+
+    mtx_dense <- as.matrix(mtx_pathway)
+    sample_mean <- apply(mtx_dense, 1, function(x) by(x, cond_tot, mean))
+    keep <- colnames(sample_mean)[apply(sample_mean, 2, check.cols)]
+    if (length(keep) < 3) {
+      return(NULL)
+    }
+
+    mtx_dense <- mtx_dense[keep, , drop = FALSE]
+    mean_expr_by_cluster <- apply(mtx_dense, 1, function(x) by(x, cond_tot, mean))
+    ratio_expr <- t(mean_expr_by_cluster) / colMeans(mean_expr_by_cluster)
+    gene_weight <- apply(mtx_dense, 1, stats::var)
+    mean_exp_pathway <- apply(ratio_expr, 2, function(x) stats::weighted.mean(x, gene_weight / sum(gene_weight)))
+    return(mean_exp_pathway)
+  }
 
   MitoList <- list()
-
-  mtx <- mac_obj@CountData@NormalizedCount
-  cond_tot <- mac_obj@MetaData[[meta]]
-  cond <- unique(cond_tot)
-
   for (m in names(MitoPath)) {
-    pathway <- MitoPath[[m]]
-    path_names <- names(pathway)
-    mito_expression <- matrix(NA,nrow=length(path_names),ncol=length(cond),dimnames = list(path_names,cond))
+    message("Scanning category: ", m)
+    category_pathways <- MitoPath[[m]]
+    path_names <- names(category_pathways)
 
-    #progress bar
-    message(m)
-    pb <- txtProgressBar(min = 0, max = length(path_names)-1, style = 3, width = 60, char = "+")
-    i=0
+    scored_list <- future.apply::future_lapply(path_names, score_mito, category_pathways = category_pathways, future.seed = TRUE)
+    names(scored_list) <- path_names
+    scored_list <- scored_list[!sapply(scored_list, is.null)]
 
-    for (p in path_names) {
-      ####### progress bar ###
-      setTxtProgressBar(pb, i)
-      i = i + 1
-      ########################
-
-      genes <- pathway[[p]]
-      genes <- intersect(genes, rownames(mtx))
-      if(length(genes) < 5) next
-      mtx_pathway <- mtx[genes,]
-      mtx_pathway <- mtx_pathway[rowSums(mtx_pathway)>0,]
-      sample_mean <- apply(mtx_pathway, 1, function(x)by(x, cond_tot, mean))
-      keep <- colnames(sample_mean)[apply(sample_mean, 2, check.cols)]
-      if(length(keep)<3) next
-      mtx_pathway <- mtx_pathway[keep,]
-      mean_expr <- apply(mtx_pathway, 1, function(x)by(x, cond_tot, mean))
-      ratio_expr <- t(mean_expr) / colMeans(mean_expr)
-      gene_weight <- apply(mtx_pathway, 1, var)
-      mean_exp_pathway <- apply(ratio_expr, 2, function(x) weighted.mean(x, gene_weight/sum(gene_weight)))
-      mito_expression[p,] <-  mean_exp_pathway
-    }
-    close(pb)
-
-    MitoList[[m]] <- as.data.frame(mito_expression)
+    MitoList[[m]] <- as.data.frame(do.call(rbind, scored_list))
   }
-  mac_obj@MitoScanneR[[meta]] <- MitoList
 
-  return(mac_obj)
+  object@misc$MACanalyzeR$MitoScanneR[[group.by]] <- MitoList
+  return(object)
 }
 
-HeatMito <- function(mac_obj, plot.by=mac_obj@ident, col=c("blue","white","red"), txt.size=10){
-  if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
-  if (length(mac_obj@MitoScanneR[[plot.by]])==0) stop("Before HeatMito() run the MitoScanneR(mac_obj, meta='",plot.by,"') function")
+#' Heatmap of Mitochondrial Scores
+#'
+#' @param object A Seurat object
+#' @param group.by Metadata column used (default: from CreateMacObj)
+#' @param cols Colors for heatmap
+#' @param base.size Font size
+#' @importFrom pheatmap pheatmap
+#' @importFrom grDevices colorRampPalette
+#' @export
+HeatMito <- function(object, group.by = NULL, cols = c("blue", "white", "red"), base.size = 10) {
+  if (is.null(group.by)) {
+    group.by <- object@misc$MACanalyzeR$ident
+  }
 
-  for (mitoname in names(mac_obj@MitoScanneR[[plot.by]][8:1])) {
-    dat <- mac_obj@MitoScanneR[[plot.by]][[mitoname]]
+  mito_data <- object@misc$MACanalyzeR$MitoScanneR[[group.by]]
+  if (is.null(mito_data)) {
+    stop("Run 'MitoScanneR' first")
+  }
+
+  for (mitoname in names(mito_data)[length(mito_data):1]) {
+    dat <- mito_data[[mitoname]]
     sort_row <- c()
-    for(i in colnames(dat)){
-      select_row <- which(apply(dat, 1, max) == dat[,i])
-      tmp <- rownames(dat)[select_row][order(dat[select_row,i],decreasing = T)]
-      sort_row <- c(sort_row,tmp)
+    for (i in colnames(dat)) {
+      select_row <- which(apply(dat, 1, max) == dat[, i])
+      tmp <- rownames(dat)[select_row][order(dat[select_row, i], decreasing = TRUE)]
+      sort_row <- c(sort_row, tmp)
     }
     dat[is.na(dat)] <- 1
-    b <- max((max(dat)-1), (1-min(dat)))
+    b <- max((max(dat) - 1), (1 - min(dat)))
     mybreaks <- c(
-      seq((1-b), 1-(b/3), length.out=33),
-      seq(1-(b/3)+0.01, 1+(b/3), length.out=34),
-      seq(1+(b/3)+0.01, 1+b,length.out=33)
+      seq((1 - b), 1 - (b / 3), length.out = 33),
+      seq(1 - (b / 3) + 0.01, 1 + (b / 3), length.out = 34),
+      seq(1 + (b / 3) + 0.01, 1 + b, length.out = 33)
     )
-    color <- colorRampPalette(col)(100)
-    pheatmap(dat[sort_row,],cluster_cols = F,cluster_rows = F,color=color,breaks = mybreaks, main=gsub("_"," ",mitoname),
-             fontsize = txt.size, border_color=F)
+    color <- grDevices::colorRampPalette(cols)(100)
+    pheatmap::pheatmap(dat[sort_row, ], cluster_cols = FALSE, cluster_rows = FALSE, color = color, breaks = mybreaks, main = gsub("_", " ", mitoname),
+             fontsize = base.size, border_color = FALSE)
   }
-
 }
 
-MitoBalance <- function(mac_obj, plot.by = "Sample", txt.size = 15, ncol=1, col=NULL, intercept = F, title="MitoNuclear Balance") {
-  if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
-
-  check.cols <- function(vect){
-    for (x in vect) {
-      if (x < 0.001) {
-        return(FALSE)
-      }
-    }
-    return(TRUE)
+#' Mitochondrial/Nuclear Balance
+#'
+#' @param object A Seurat object
+#' @param group.by Metadata column for grouping
+#' @param base.size Font size
+#' @param ncol Number of columns for facetting
+#' @param cols Custom colors
+#' @param intercept Show intercept at 0
+#' @param title Plot title
+#' @param assay Assay (default: DefaultAssay(object))
+#' @param layer Layer
+#' @return A ggplot object
+#' @import ggplot2
+#' @importFrom Seurat DefaultAssay
+#' @export
+MitoBalance <- function(object, group.by = "Sample", base.size = 15, ncol = 1, cols = NULL, intercept = FALSE, title = "MitoNuclear Balance", assay = NULL, layer = "data") {
+  mac_info <- object@misc$MACanalyzeR
+  if (is.null(mac_info)) {
+    stop("MACanalyzeR object not initialized. Please run 'CreateMacObj' first")
   }
 
-  mtx <- mac_obj@CountData@NormalizedCount
-  cond_tot <- as.vector(mac_obj@MetaData[[plot.by]])
-  cond <- unique(cond_tot)
+  if (is.null(assay)) {
+    assay <- Seurat::DefaultAssay(object)
+  }
+  mtx <- Seurat::GetAssayData(object, assay = assay, layer = layer)
+  cond_tot <- as.vector(object@meta.data[[group.by]])
   path_names <- c("OXPHOS mitochondrial subunits", "OXPHOS nuclear subunits")
 
-  path_expression <- matrix(NA,nrow=length(colnames(mtx)),ncol=length(path_names),dimnames = list(colnames(mtx), path_names))
-
-  for (p in path_names) {
-    ##  genes <- MACanalyzeR::MitoScan$OXPHOS[[p]]
-    if (mac_obj@organism=="mm") genes <- MACanalyzeR::mouse_MitoCarta$OXPHOS[[p]]
-    else genes <- MACanalyzeR::human_MitoCarta$OXPHOS[[p]]
-
-    genes <- intersect(genes, rownames(mtx))
-    if(length(genes) < 5) next
-    mtx_pathway <- mtx[genes,]
-    mtx_pathway <- mtx_pathway[rowSums(mtx_pathway)>0,]
-    sample_mean <- apply(mtx_pathway, 1, function(x)by(x, cond_tot, mean))
-    keep <- colnames(sample_mean)[apply(sample_mean, 2, check.cols)]
-    if(length(keep)<3) next
-
-    mtx_pathway <- mtx_pathway[keep,]
-    mean_expr <- apply(mtx_pathway, 1, function(x)by(x, cond_tot, mean))
-    ratio_expr <- mtx_pathway / colMeans(mean_expr)
-    gene_weight <- apply(mtx_pathway, 1, var)
-    mean_exp_pathway <- apply(ratio_expr, 2, function(x) weighted.mean(x, gene_weight/sum(gene_weight)))
-    path_expression[,p] <-  mean_exp_pathway
+  if (mac_info$organism == "mm") {
+    MitoPath <- MACanalyzeR::mouse_MitoCarta$OXPHOS
+  } else {
+    MitoPath <- MACanalyzeR::human_MitoCarta$OXPHOS
   }
 
-  dat <- as.data.frame(path_expression)
-  dat[,"MitochondrialBalance"] <- log10(dat[,1]/dat[,2])
-  dat[,plot.by] <- mac_obj@MetaData[[plot.by]]
+  check.cols <- function(vect) {
+    all(vect >= 0.001)
+  }
 
-  threshold <- !is.infinite(dat$MitochondrialBalance)
-  message("Removed ", sum(!threshold), " cell containing non-finite value")
-  dat <- dat[threshold,]
+  calc_score <- function(p) {
+    genes <- intersect(MitoPath[[p]], rownames(mtx))
+    if (length(genes) < 5) {
+      return(NULL)
+    }
+    mtx_p <- mtx[genes, , drop = FALSE]
+    mtx_p <- mtx_p[Matrix::rowSums(mtx_p) > 0, , drop = FALSE]
 
-  plot <- list()
+    mtx_dense <- as.matrix(mtx_p)
+    sample_mean <- apply(mtx_dense, 1, function(x) by(x, cond_tot, mean))
+    keep <- colnames(sample_mean)[apply(sample_mean, 2, check.cols)]
+    if (length(keep) < 3) {
+      return(NULL)
+    }
 
-  p1 <- ggplot(dat, aes(x=dat[,4], y=dat[,3], fill = dat[,4], color = dat[,4])) +
+    mtx_dense <- mtx_dense[keep, , drop = FALSE]
+    mean_expr <- apply(mtx_dense, 1, function(x) by(x, cond_tot, mean))
+    ratio_expr <- mtx_dense / colMeans(mean_expr)
+    gene_weight <- apply(mtx_dense, 1, stats::var)
+    return(apply(ratio_expr, 2, function(x) stats::weighted.mean(x, gene_weight / sum(gene_weight))))
+  }
+
+  scores <- lapply(path_names, calc_score)
+  if (any(sapply(scores, is.null))) {
+    stop("Could not calculate scores for both subunits")
+  }
+
+  dat <- data.frame(Mito = scores[[1]], Nuclear = scores[[2]])
+  dat$MitochondrialBalance <- log10(dat$Mito / dat$Nuclear)
+  dat[[group.by]] <- object@meta.data[[group.by]]
+
+  threshold <- is.finite(dat$MitochondrialBalance)
+  if (any(!threshold)) {
+    message("Removed ", sum(!threshold), " cells containing non-finite values")
+  }
+  dat <- dat[threshold, ]
+
+  p1 <- ggplot(dat, aes(x = .data[[group.by]], y = MitochondrialBalance, fill = .data[[group.by]], color = .data[[group.by]])) +
     geom_violin() +
-    geom_boxplot(width=0.3, color="grey30", alpha=0.2) +
-    labs(x="", y="Mitochondrial/Nuclear GeneRatio") +
+    geom_boxplot(width = 0.3, color = "grey30", alpha = 0.2) +
+    labs(x = "", y = "log10(Mitochondrial/Nuclear GeneRatio)") +
     ggtitle(title) +
-    theme(text = element_text(size = txt.size),
-          panel.background = element_blank(),
-          legend.key=element_rect(fill="white"),
-          axis.text.x = element_text(color = "black"),
-          axis.text.y = element_text(color = "black"),
-          axis.line = element_line(),
-          strip.background = element_rect(color = "black"),
-          legend.position="none")
+    theme_classic(base_size = base.size) +
+    theme(legend.position = "none")
 
   if (intercept) {
     p1 <- p1 + geom_hline(yintercept = 0, colour = 'grey30')
   }
-
-  if (!is.null(col)) {
-    if (length(col) == length(unique(dat[,plot.by]))) {
-      p1 <- p1 + scale_fill_manual(values = col) + scale_color_manual(values = col)
-    } else {
-      stop("Number of color must correspond number of ", plot.by, " : ", length(unique(dat[,4])))
-    }
+  if (!is.null(cols)) {
+    p1 <- p1 + scale_fill_manual(values = cols) + scale_color_manual(values = cols)
   }
+
   return(p1)
 }
 
-GliOxBalance <- function(mac_obj, plot.by = "Cluster", txt.size = 15, ncol=1, col=NULL, intercept = F, title="GlicoOxphos Balance") {
-  if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
-
-  check.cols <- function(vect){
-    for (x in vect) {
-      if (x < 0.001) {
-        return(FALSE)
-      }
-    }
-    return(TRUE)
+#' Glycolysis/OXPHOS Balance
+#'
+#' @param object A Seurat object
+#' @param group.by Metadata column for grouping
+#' @param base.size Font size
+#' @param ncol Number of columns for facetting
+#' @param cols Custom colors
+#' @param intercept Show intercept at 0
+#' @param title Plot title
+#' @param assay Assay (default: DefaultAssay(object))
+#' @param layer Layer
+#' @return A ggplot object
+#' @import ggplot2
+#' @importFrom Seurat DefaultAssay
+#' @export
+GliOxBalance <- function(object, group.by = "Cluster", base.size = 15, ncol = 1, cols = NULL, intercept = FALSE, title = "GlycoOxphos Balance", assay = NULL, layer = "data") {
+  mac_info <- object@misc$MACanalyzeR
+  if (is.null(mac_info)) {
+    stop("MACanalyzeR object not initialized. Please run 'CreateMacObj' first")
   }
 
-  mtx <- mac_obj@CountData@NormalizedCount
-  cond_tot <- as.vector(mac_obj@MetaData[[plot.by]])
-  cond <- unique(cond_tot)
+  if (is.null(assay)) {
+    assay <- Seurat::DefaultAssay(object)
+  }
+  mtx <- Seurat::GetAssayData(object, assay = assay, layer = layer)
+  cond_tot <- as.vector(object@meta.data[[group.by]])
   path_names <- c("GLYCOLYSIS_GLUCONEOGENESIS", "OXIDATIVE_PHOSPHORYLATION")
 
-  path_expression <- matrix(NA,nrow=length(colnames(mtx)),ncol=length(path_names),dimnames = list(colnames(mtx), path_names))
-
-  for (p in path_names) {
-    if (mac_obj@organism=="mm") genes <- MACanalyzeR::mouse_selected[[p]]
-    else genes <- MACanalyzeR::human_selected[[p]]
-
-    genes <- intersect(genes, rownames(mtx))
-    if(length(genes) < 5) next
-    mtx_pathway <- mtx[genes,]
-    mtx_pathway <- mtx_pathway[rowSums(mtx_pathway)>0,]
-    sample_mean <- apply(mtx_pathway, 1, function(x)by(x, cond_tot, mean))
-    keep <- colnames(sample_mean)[apply(sample_mean, 2, check.cols)]
-    if(length(keep)<3) next
-
-    mtx_pathway <- mtx_pathway[keep,]
-    mean_expr <- apply(mtx_pathway, 1, function(x)by(x, cond_tot, mean))
-    ratio_expr <- mtx_pathway / colMeans(mean_expr)
-    gene_weight <- apply(mtx_pathway, 1, var)
-    mean_exp_pathway <- apply(ratio_expr, 2, function(x) weighted.mean(x, gene_weight/sum(gene_weight)))
-    path_expression[,p] <-  mean_exp_pathway
+  if (mac_info$organism == "mm") {
+    PathwaySet <- MACanalyzeR::mouse_selected
+  } else {
+    PathwaySet <- MACanalyzeR::human_selected
   }
 
-  dat <- as.data.frame(path_expression)
-  dat[,"MitochondrialBalance"] <- log10(dat[,1]/dat[,2])
-  dat[,plot.by] <- mac_obj@MetaData[[plot.by]]
+  check.cols <- function(vect) {
+    all(vect >= 0.001)
+  }
 
-  threshold <- !is.infinite(dat$MitochondrialBalance)
-  message("Removed ", sum(!threshold), " cell containing non-finite value")
-  dat <- dat[threshold,]
+  calc_score <- function(p) {
+    genes <- intersect(PathwaySet[[p]], rownames(mtx))
+    if (length(genes) < 5) {
+      return(NULL)
+    }
+    mtx_p <- mtx[genes, , drop = FALSE]
+    mtx_p <- mtx_p[Matrix::rowSums(mtx_p) > 0, , drop = FALSE]
 
-  plot <- list()
+    mtx_dense <- as.matrix(mtx_p)
+    sample_mean <- apply(mtx_dense, 1, function(x) by(x, cond_tot, mean))
+    keep <- colnames(sample_mean)[apply(sample_mean, 2, check.cols)]
+    if (length(keep) < 3) {
+      return(NULL)
+    }
 
-  p1 <- ggplot(dat, aes(x=dat[,4], y=dat[,3], fill = dat[,4], color = dat[,4])) +
+    mtx_dense <- mtx_dense[keep, , drop = FALSE]
+    mean_expr <- apply(mtx_dense, 1, function(x) by(x, cond_tot, mean))
+    ratio_expr <- mtx_dense / colMeans(mean_expr)
+    gene_weight <- apply(mtx_dense, 1, stats::var)
+    return(apply(ratio_expr, 2, function(x) stats::weighted.mean(x, gene_weight / sum(gene_weight))))
+  }
+
+  scores <- lapply(path_names, calc_score)
+  if (any(sapply(scores, is.null))) {
+    stop("Could not calculate scores for both pathways")
+  }
+
+  dat <- data.frame(Glyco = scores[[1]], OXPHOS = scores[[2]])
+  dat$Balance <- log10(dat$Glyco / dat$OXPHOS)
+  dat[[group.by]] <- object@meta.data[[group.by]]
+
+  threshold <- is.finite(dat$Balance)
+  if (any(!threshold)) {
+    message("Removed ", sum(!threshold), " cells containing non-finite values")
+  }
+  dat <- dat[threshold, ]
+
+  p1 <- ggplot(dat, aes(x = .data[[group.by]], y = Balance, fill = .data[[group.by]], color = .data[[group.by]])) +
     geom_violin() +
-    geom_boxplot(width=0.3, color="grey30", alpha=0.2) +
-    labs(x="", y="Glicolysis/OXPHOS GeneRatio") +
+    geom_boxplot(width = 0.3, color = "grey30", alpha = 0.2) +
+    labs(x = "", y = "log10(Glycolysis/OXPHOS GeneRatio)") +
     ggtitle(title) +
-    theme(text = element_text(size = txt.size),
-          panel.background = element_blank(),
-          legend.key=element_rect(fill="white"),
-          axis.text.x = element_text(color = "black"),
-          axis.text.y = element_text(color = "black"),
-          axis.line = element_line(),
-          strip.background = element_rect(color = "black"),
-          legend.position="none")
+    theme_classic(base_size = base.size) +
+    theme(legend.position = "none")
 
   if (intercept) {
     p1 <- p1 + geom_hline(yintercept = 0, colour = 'grey30')
   }
-
-  if (!is.null(col)) {
-    if (length(col) == length(unique(dat[,plot.by]))) {
-      p1 <- p1 + scale_fill_manual(values = col) + scale_color_manual(values = col)
-    } else {
-      stop("Number of color must correspond number of ", plot.by, " : ", length(unique(dat[,4])))
-    }
+  if (!is.null(cols)) {
+    p1 <- p1 + scale_fill_manual(values = cols) + scale_color_manual(values = cols)
   }
+
   return(p1)
 }
 
