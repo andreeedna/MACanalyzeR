@@ -1,57 +1,38 @@
 \name{PathViolin}
 \alias{PathViolin}
 
-\title{
-Pathway Violinplot
-}
+\title{Violin plots of single-cell pathway scores}
 
 \description{
- The `PathViolin()` function allows you to visualize the distribution of expression for individual pathways and enables statistical comparisons between these expressions across different metadata.
- }
+Draws, for each selected pathway, a violin plot (with an overlaid boxplot) of the single-cell scores computed by \code{\link{PathAnalyzeR}} in each group, optionally with the p-values of all pairwise comparisons between groups.
+}
 
 \usage{
-PathViolin(mac_obj,
-           pathway,
-           plot.by = "Sample",
-           txt.size = 15,
-           ncol = 1,
-           col = NULL,
-           intercept = NULL,
-           stat = F
-           )
+PathViolin(mac_obj, pathway, plot.by = mac_obj@ident, txt.size = 15, ncol = 1,
+           col = NULL, intercept = FALSE, stat = FALSE)
 }
 
 \arguments{
-  \item{mac_obj}{
-MACanalyzeR object
+  \item{mac_obj}{A \code{MACanalyzeR} object on which \code{\link{PathAnalyzeR}} has been run with \code{meta = plot.by}.}
+  \item{pathway}{Indices (as listed by \code{\link{PathDisplay}}) or names of one or more pathways. One violin plot is drawn for each pathway.}
+  \item{plot.by}{Name of the grouping to compare. It must match the \code{meta} argument used in \code{\link{PathAnalyzeR}}. Default: the grouping set with the \code{id} argument of \code{\link{CreateMacObj}}.}
+  \item{txt.size}{Base text size. Default: \code{15}.}
+  \item{ncol}{Number of columns used to arrange the plots when more than one pathway is given. Default: \code{1}.}
+  \item{col}{Optional vector of colours, one per group of \code{plot.by}. It must have exactly one colour per group, otherwise an error is raised.}
+  \item{intercept}{Logical. If \code{TRUE}, a horizontal reference line is drawn at y = 1 (average pathway activity). Default: \code{FALSE}.}
+  \item{stat}{Logical. If \code{TRUE}, the p-values of the Wilcoxon rank-sum tests between all pairs of groups are added to the plots. Default: \code{FALSE}.}
 }
-  \item{pathway}{
-A vector with pathways' number to visualize
-}
-  \item{plot.by}{
-Name of one metadata to group the cells by (Sample, Cluster, Mac, Foam) [default: Sample]
-}
-  \item{txt.size}{
-Text size of FoamLine [default: 14]
-}
-  \item{ncol}{
-Number of columns for the PathViolin
-}
-  \item{col}{
-A vector of colors. The number of colors must match the number of classes to be plotted.
-}
-  \item{intercept}{
-Logical. Plot the intercept y=1
-}
-  \item{stat}{
-Logical. Show the pvalues
-}
-}
+
+\value{The plots are arranged in a grid and drawn with \code{\link[gridExtra]{grid.arrange}}, which also returns them invisibly as a \code{gtable} object.}
+
+\seealso{\code{\link{PathAnalyzeR}}, \code{\link{PathDisplay}}}
 
 \examples{
-# PathAnalyzeR pathway score
-mac_obj <- PathAnalyzeR(mac_obj)
+\dontrun{
+mac_obj <- PathAnalyzeR(mac_obj, meta = "Sample")
+PathDisplay(mac_obj, meta = "Sample")
 
-# Pathway Violinplot
-PathViolin(mac_obj, pathway=c(1,2))
+PathViolin(mac_obj, pathway = c(1, 2), plot.by = "Sample", ncol = 2)
+PathViolin(mac_obj, pathway = 1, plot.by = "Sample", intercept = TRUE, stat = TRUE)
+}
 }

@@ -1,56 +1,39 @@
 \name{FoamPlot}
 \alias{FoamPlot}
 
-\title{
-FoamDEX Plot
-}
+\title{Plot the FoamDEX score on the dimensionality reduction}
 
 \description{
-The FoamPlot() function creates a 2D scatter plot for visualizing FoamDEX score on single-cell.
-Each point in the plot represents a cell coloured by the FoamDEX score.
+Draws a 2D scatter plot of the cells on the embedding, coloured by their FoamDEX score (the probability of being a foam-like macrophage computed by \code{\link{FoamSpotteR}}). Cells with the highest scores are drawn on top.
 }
 
 \usage{
-FoamPlot(mac_obj,
-         txt.size = 14,
-         shade = "viridis",
-         split.by = NULL,
-         pt.size = 2,
-         ncol = 2)
+FoamPlot(mac_obj, txt.size = 14, shade = "viridis", split.by = NULL,
+         pt.size = 2, ncol = 3)
 }
 
 \arguments{
-  \item{mac_obj}{
-MACanalyzeR object
-}
-  \item{txt.size}{
-Text size of FoamPlot [default: 14]
-}
-  \item{shade}{
-Shades of FoamDEX plot. Eight option are available: magma, inferno, plasma, viridis, cividis, rocket, mako and turbo [default: viridis]
-}
-  \item{split.by}{
-Name of one metadata to split the FoamPlot by (Sample, Cluster, Mac, Foam) [default: NULL]
-}
-  \item{pt.size}{
-Point size of FoamPlot [default: 2]
-}
-  \item{ncol}{
-Number of columns for the FoamPlot split
-}
+  \item{mac_obj}{A \code{MACanalyzeR} object on which \code{\link{FoamSpotteR}} has been run.}
+  \item{txt.size}{Base text size. Default: \code{14}.}
+  \item{shade}{Viridis colour scale used for the FoamDEX. One of \code{"magma"}, \code{"inferno"}, \code{"plasma"}, \code{"viridis"}, \code{"cividis"}, \code{"rocket"}, \code{"mako"} or \code{"turbo"}. Default: \code{"viridis"}.}
+  \item{split.by}{Optional name of a metadata column used to split the plot into panels. Default: \code{NULL} (no split).}
+  \item{pt.size}{Point size. Default: \code{2}.}
+  \item{ncol}{Number of columns of the panel grid when \code{split.by} is used. Default: \code{3}.}
 }
 
 \details{
-The FoamDEX is a value between 0 and 1 that indicated the probability of that cell is a foam-like macrophage
+The FoamDEX ranges from 0 to 1 and represents the probability that a cell is a foam-like macrophage. The colour scale always spans the full 0-1 range, so plots of different datasets are directly comparable.
 }
 
+\value{A \code{ggplot} object.}
+
+\seealso{\code{\link{FoamSpotteR}}, \code{\link{FoamLine}}}
+
 \examples{
-##  FoamSpotteR prediction
+\dontrun{
 mac_obj <- FoamSpotteR(mac_obj)
 
-##  base FoamPlot
 FoamPlot(mac_obj)
-
-##  splitter FoamPlot
-FoamPlot(mac_obj, split.by="Sample")
+FoamPlot(mac_obj, split.by = "Sample", shade = "magma", pt.size = 1.5)
+}
 }

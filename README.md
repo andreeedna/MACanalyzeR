@@ -1,5 +1,3 @@
-<div align="center">
-
 # MACanalyzeR
 
 ### Single-cell characterization of macrophages in R
@@ -12,9 +10,7 @@
 ![R](https://img.shields.io/badge/R-%E2%89%A5%204.0-276DC3?style=flat-square&logo=r&logoColor=white)
 ![Seurat](https://img.shields.io/badge/Seurat-v4%20%7C%20v5-6a4c93?style=flat-square)
 ![Organisms](https://img.shields.io/badge/organisms-mouse%20%7C%20human-e07a5f?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.0.0-lightgrey?style=flat-square)
-
-</div>
+![Version](https://img.shields.io/badge/version-1.1.0-lightgrey?style=flat-square)
 
 ---
 
@@ -25,9 +21,11 @@
 | Module | What it does | How |
 |---|---|---|
 | 🫧 **FoamSpotteR** | Identifies foam-like macrophages (**fMAC+** / **fMAC−**) and gives each cell a **FoamDEX** score (probability of being foamy, 0–1) | Random forest classifier trained on foamy macrophages from atherosclerotic plaques |
-| 🧭 **MacPolarizeR** | Classifies macrophage polarization | Clustering built on curated pro- and anti-inflammatory gene sets |
+| 🧭 **MacPolarizeR** | Classifies cells as Inflammatory, Transitional or Healing, with M1/M2 scores and a per-cell stability | Reproducible clustering of the M1/M2 polarization balance of curated marker genes |
 | 🛤️ **PathAnalyzeR** | Scores pathways per cell and per condition/cluster, for easy comparison across groups | Built-in KEGG, GO and Reactome collections, or any custom gene set |
 | ⚡ **MitoScanneR** | Profiles mitochondrial and oxidative activity, mito-nuclear and glycolysis/OXPHOS balance | PathAnalyzeR scoring on MitoCarta 3.0 pathways |
+
+MACanalyzeR works with mouse and human data and keeps sparse matrices sparse, so large datasets fit in memory.
 
 ## 📦 Installation
 
@@ -35,7 +33,7 @@ MACanalyzeR depends on a few CRAN packages. Install them first:
 
 ```r
 install.packages(c("ggplot2", "ggpubr", "gridExtra", "pheatmap",
-                   "caret", "randomForest"))
+                   "caret", "randomForest", "Matrix", "SeuratObject"))
 ```
 
 Then install the development version from GitHub:
@@ -70,8 +68,9 @@ mac_obj <- FoamSpotteR(mac_obj)
 FoamPlot(mac_obj)                       # FoamDEX on the embedding
 FoamLine(mac_obj, plot.by = "Sample")   # FoamDEX distribution per group
 
-# 3. Polarization
+# 3. Polarization (reproducible: fixed seed by default)
 mac_obj <- MacPolarizeR(mac_obj)
+summary(mac_obj@MetaData$Mac.stability)   # per-cell stability of the assignment
 MacPlot(mac_obj, plot.by = "Mac")
 MacBarplot(mac_obj, plot.by = "Sample")
 MacRadar(mac_obj, plot.by = "Sample")
@@ -90,9 +89,12 @@ MitoBalance(mac_obj, plot.by = "Sample")
 GliOxBalance(mac_obj, plot.by = "Sample")
 ```
 
-Custom gene sets can be passed to `PathAnalyzeR()` as a named list:
+Any MSigDB collection is available offline through `PathCreatoR()`, and custom gene sets can be passed to `PathAnalyzeR()` as a named list:
 
 ```r
+hallmark <- PathCreatoR("mm", "MH")
+mac_obj  <- PathAnalyzeR(mac_obj, pathway = hallmark, meta = "Sample")
+
 my_pathways <- list(
   "Lipid uptake"   = c("Cd36", "Lpl", "Msr1"),
   "LAM signature"  = c("Trem2", "Gpnmb", "Lgals3", "Cd9")
@@ -100,7 +102,7 @@ my_pathways <- list(
 mac_obj <- PathAnalyzeR(mac_obj, pathway = my_pathways, meta = "Cluster")
 ```
 
-📖 The full step-by-step tutorial is in the **[vignette](https://andreeedna.github.io/projects/)**.
+📖 The full step-by-step tutorial is in the **[vignette](https://andreeedna.github.io/projects/MACanalyzeR_Vignette/)**.
 
 ## 🧰 Function overview
 
@@ -110,10 +112,12 @@ mac_obj <- PathAnalyzeR(mac_obj, pathway = my_pathways, meta = "Cluster")
 | FoamSpotteR | `FoamSpotteR()` | `FoamPlot()`, `FoamLine()` |
 | MacPolarizeR | `MacPolarizeR()` | `MacBarplot()`, `MacRadar()`, `PolCart()` |
 | PathAnalyzeR | `PathAnalyzeR()`, `PathCreatoR()` | `PathHeat()`, `PathDisplay()`, `PathCart()`, `PathPlot()`, `PathViolin()` |
-| MitoScanneR | `MitoScanneR()` | `HeatMito()`, `MitoBalance()`, `GliOxBalance()` |
-| Spectrum | — | `macSpectrum()` (`mode = "macspectrum"` or `"atherospectrum"`) |
+| MitoScanneR | `MitoScanneR()` | `HeatMito()`, `MitoBalance()`, `GliOxBalance()`, `GeneBalance()` |
+| Spectrum | `MacSpectrumIndex()` | `macSpectrum()` (`mode = "macspectrum"` or `"atherospectrum"`) |
 
-Built-in reference data include KEGG, GO and Reactome collections, GSEA gene-set collections (retrieved with `PathCreatoR(organism, subcollection)`), MitoCarta 3.0, polarization and LAM gene sets for both mouse and human, plus a human–mouse ortholog dictionary.
+Built-in reference data include KEGG, GO and Reactome collections, the MSigDB collections for mouse and human (retrieved with `PathCreatoR()`), MitoCarta 3.0, polarization and LAM gene sets for both mouse and human, plus a human–mouse ortholog dictionary.
+
+See [NEWS.md](NEWS.md) for the changes in each version.
 
 ## 📝 Citation
 

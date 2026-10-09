@@ -1,324 +1,206 @@
-PathAnalyzeR <- function(mac_obj, pathway=NULL, meta=NULL){
-  if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
-
-  if (is.null(mac_obj@MetaData[,meta])) {
-    if (meta == "Mac") {
-      stop("MacPolarizeR prediction is absent. Please, before run MacPolarizeR() function")
-    } else if (meta == "Foam"){
-      stop("FoamFinder prediction is absent. Please, before run FoamSpotteR() function")
-    } else {
-      stop("meta must be Sample, Cluster, Mac or Foam")
-    }
-  }
+PathAnalyzeR <- function(mac_obj, pathway = NULL, meta = NULL, verbose = TRUE) {
+  .check_obj(mac_obj)
+  if (is.null(meta)) meta <- mac_obj@ident
+  .check_col(mac_obj, meta, "meta")
 
   if (is.null(pathway)) {
-    if (mac_obj@organism=="mm") pathway <- MACanalyzeR::mouse_selected
-    else pathway <- MACanalyzeR::human_selected
+    pathway <- .org_data(mac_obj, MACanalyzeR::mouse_selected, MACanalyzeR::human_selected)
+  } else if (is.character(pathway)) {
+    pathway <- list("Custom gene set" = pathway)
   } else if (!is.list(pathway)) {
-    stop("Pathway must be a list! Use data('mouse_selected') or data('human_selected') to have an example")
+    stop("'pathway' must be a named list of gene vectors. See MACanalyzeR::mouse_selected for an example.",
+         call. = FALSE)
   }
 
-  if (is.null(meta)) meta <- mac_obj@ident
-
-  check.cols <- function(vect){
-    for (x in vect) {
-      if (x < 0.001) {
-        return(FALSE)
-      }
-    }
-    return(TRUE)
+  groups <- mac_obj@MetaData[[meta]]
+  if (length(unique(stats::na.omit(groups))) < 2) {
+    warning("'", meta, "' has only one group: group-level scores are all 1 and no p-value is computed",
+            call. = FALSE)
   }
 
-  path_names <- names(pathway)
-  mtx <- mac_obj@CountData@NormalizedCount
-  cond_tot <- mac_obj@MetaData[,meta]
-  cond <- levels(factor(cond_tot))
+  res <- .score_list(mac_obj, pathway, groups, single = TRUE, test = TRUE, verbose = verbose,
+                     label = paste0("PathAnalyzeR on ", meta, " (", length(pathway), " gene sets)"))
 
-  ll <- list()
+  total <- as.data.frame(res$total)
+  total$pval <- res$pval
+  total$padj <- stats::p.adjust(res$pval, method = "BH")
 
-  for (store in c("Total","SingleCell")) {
-    if (store == "SingleCell") {
-      path_expression <- matrix(NA,nrow=length(colnames(mtx)),ncol=length(path_names),dimnames = list(colnames(mtx), path_names))
-    } else {
-      path_expression <- matrix(NA,nrow=length(path_names),ncol=length(cond)+1,dimnames = list(path_names,c(cond, "pval")))
-    }
-
-    #progress bar
-    message(store)
-    pb <- txtProgressBar(min = 0, max = length(path_names)-1, style = 3, width = 60, char = "+")
-    i=0
-
-    for (p in path_names) {
-      ####### progress bar ###
-      setTxtProgressBar(pb, i)
-      i = i + 1
-      ########################
-
-      genes <- pathway[[p]]
-      genes <- intersect(genes, rownames(mtx))
-
-      if(length(genes) < 5) next
-
-      mtx_pathway <- mtx[genes,]
-      mtx_pathway <- mtx_pathway[rowSums(mtx_pathway)>0,]
-      sample_mean <- apply(mtx_pathway, 1, function(x)by(x, cond_tot, mean))
-      keep <- colnames(sample_mean)[apply(sample_mean, 2, check.cols)]
-
-      if(length(keep)<3) next
-
-      if(store == "SingleCell"){
-        mtx_pathway <- mtx_pathway[keep,]
-        mean_expr <- apply(mtx_pathway, 1, function(x)by(x, cond_tot, mean))
-        ratio_expr <- mtx_pathway / colMeans(mean_expr)
-        gene_weight <- apply(mtx_pathway, 1, var)
-        mean_exp_pathway <- apply(ratio_expr, 2, function(x) weighted.mean(x, gene_weight/sum(gene_weight)))
-        path_expression[,p] <-  mean_exp_pathway
-      } else {
-        mtx_pathway <- mtx_pathway[keep,]
-        sample_mean <- apply(mtx_pathway, 1, function(x)by(x, cond_tot, mean))
-        ratio_expr <- t(sample_mean) / colMeans(sample_mean)
-        gene_weight <- apply(mtx_pathway, 1, var)
-        mean_exp_pathway <- apply(ratio_expr, 2, function(x) weighted.mean(x, gene_weight/sum(gene_weight)))
-        path_expression[p, ] <-  c(mean_exp_pathway[cond], wilcox.test(ratio_expr[,1],mu=1)$p.value)
-        }
-    }
-    close(pb)
-
-    ll[[store]] <- as.data.frame(path_expression)
-  }
-  mac_obj@PathAnalyzeR[[meta]] <- ll
-  return(mac_obj)
+  mac_obj@PathAnalyzeR[[meta]] <- list(Total = total, SingleCell = as.data.frame(res$single, check.names = FALSE))
+  mac_obj
 }
 
 #####
 
-PathHeat <- function(mac_obj, plot.by=mac_obj@ident, col=c("blue","white","red"), pval=0.05, txt.size=10){
-  if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
-  if (is.null(mac_obj@PathAnalyzeR[[plot.by]][["Total"]])) stop("Before PathHeatPlot() run the PathAnalyzeR(mac_obj, meta='",plot.by,"') function")
-
+PathHeat <- function(mac_obj, plot.by = mac_obj@ident, col = c("blue", "white", "red"), pval = 0.05,
+                     txt.size = 10, adjust = FALSE) {
+  .check_obj(mac_obj)
   dfplot <- mac_obj@PathAnalyzeR[[plot.by]][["Total"]]
-  dfplot <- dfplot[which(dfplot$pval<pval),colnames(dfplot)!="pval"]
-
-  sort_row <- c()
-  for(i in colnames(dfplot)){
-    select_row <- which(apply(dfplot, 1, max) == dfplot[,i])
-    tmp <- rownames(dfplot)[select_row][order(dfplot[select_row,i],decreasing = T)]
-    sort_row <- c(sort_row,tmp)
-  }
-  dfplot[is.na(dfplot)] <- 1
-  b <- max((max(dfplot)-1), (1-min(dfplot)))
-  mybreaks <- c(
-    seq((1-b), 1-(b/3), length.out=33),
-    seq(1-(b/3)+0.01, 1+(b/3), length.out=34),
-    seq(1+(b/3)+0.01, 1+b,length.out=33)
-  )
-  color <- colorRampPalette(col)(100)
-  pheatmap(dfplot[sort_row,],cluster_cols = F,cluster_rows = F,color=color,breaks = mybreaks, fontsize = txt.size, border_color = F)
-}
-
-
-PathDisplay <- function(mac_obj, meta=mac_obj@ident){
-  if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
-  if (is.null(mac_obj@PathAnalyzeR[[meta]][["SingleCell"]])) stop("Before PathHeatPlot() run PathAnalyzeR(mac_obj, meta='",meta,"')")
-
-  message("Pathway Used for ", meta, " Pathway Analysis:")
-  i=1
-  for (p in colnames(mac_obj@PathAnalyzeR[[meta]][["SingleCell"]])) {
-    message(i,'-', p)
-    i=i+1
-  }
-}
-
-
-PathCart <- function(mac_obj, pathway, plot.by=mac_obj@ident, split.by=NULL, fill=T, a=0.1, col=NULL, txt.size=15, ncol=3){
-  if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
-  if (is.null(mac_obj@PathAnalyzeR[[plot.by]][["SingleCell"]])) stop("Before PathCartPlot() run PathAnalyzeR(mac_obj, meta='",plot.by,"')")
-
-  if(!is.null(split.by)){
-    if (!split.by %in% colnames(mac_obj@MetaData)) {
-      if (split.by == "Mac") {
-        stop("MacPolarizeR prediction is absent. Please, before run MacPolarizeR() function")
-      } else if (split.by == "Foam"){
-        stop("FoamFinder prediction is absent. Please, before run FoamSpotteR() function")
-      } else {
-        stop("split.by must be in colnames(mac_obj@MetaData")
-      }
-    }
+  if (is.null(dfplot)) {
+    stop("No PathAnalyzeR results for '", plot.by, "'. Run PathAnalyzeR(mac_obj, meta = '", plot.by, "') first.",
+         call. = FALSE)
   }
 
-  all_pathway <- colnames(mac_obj@PathAnalyzeR[[plot.by]][["SingleCell"]])
-  if(length(all_pathway)<max(pathway)) stop("Out of index, number of pathway is: ", length(all_pathway))
-  pathway <- colnames(mac_obj@PathAnalyzeR[[plot.by]][["SingleCell"]])[pathway]
-
-  dfplot <- cbind(mac_obj@PathAnalyzeR[[plot.by]][["SingleCell"]][,pathway], mac_obj@MetaData)
-
-  if(length(pathway) == 1) {
-    plot <- ggplot(dfplot, aes(x=dfplot[,1], color=dfplot[,plot.by])) +
-      labs(x=pathway[1], y="", color='', fill='') +
-      geom_vline(xintercept = 1, colour = 'grey30') +
-      theme(text = element_text(size = txt.size),
-            panel.background = element_blank(),
-            axis.text.x = element_text(color = "black"),
-            axis.text.y = element_text(color = "black"),
-            axis.line = element_line(),
-            strip.background = element_rect(color = "black"))
-
-    if (fill) {
-      plot <- plot + geom_density(aes(fill=dfplot[,plot.by]), alpha=a)
-    } else {
-      plot <- plot + geom_density()
-    }
-
-    if (!is.null(col)) {
-      if (length(col) == length(unique(dfplot[,plot.by]))) {
-        plot <- plot + scale_fill_manual(values = col) + scale_color_manual(values = col)
-      } else {
-        stop("Number of color must correspond number of ", plot.by, " : ",length(unique(dfplot[,plot.by])))
-      }
-    }
-
-    if (!is.null(split.by)) {
-      plot <- plot +
-        facet_wrap(split.by, ncol = ncol)
-    }
-
-  } else if(length(pathway) == 2) {
-    plot <- ggplot(dfplot, aes(x=dfplot[,1], y=dfplot[,2])) +
-      labs(x=pathway[1], y=pathway[2], color=plot.by, fill=plot.by) +
-      geom_vline(xintercept = 1, colour = 'grey30') +
-      geom_hline(yintercept = 1, colour = 'grey30') +
-      theme(text = element_text(size = txt.size),
-            panel.background = element_blank(),
-            axis.text.x = element_text(color = "black"),
-            axis.text.y = element_text(color = "black"),
-            axis.line = element_line(),
-            strip.background = element_rect(color = "black"))
-
-    if (fill) {
-      plot <- plot + stat_density_2d(aes(color = dfplot[,plot.by], fill = dfplot[,plot.by]), geom = "polygon", alpha = a, position = "identity")
-    } else {
-      plot <- plot + geom_density_2d(aes(color=dfplot[,plot.by]))
-    }
-
-    if (!is.null(col)) {
-      if (length(col) == length(unique(dfplot[,plot.by]))) {
-        plot <- plot + scale_fill_manual(values = col) + scale_color_manual(values = col)
-      } else {
-        stop("Number of color must correspond number of ", plot.by, " : ",length(unique(dfplot[,plot.by])))
-      }
-    }
-
-    if (!is.null(split.by)) {
-      plot <- plot +
-        facet_wrap(split.by, ncol = ncol)
-    }
+  pcol <- if (adjust && "padj" %in% colnames(dfplot)) "padj" else "pval"
+  groups <- setdiff(colnames(dfplot), c("pval", "padj"))
+  if (all(is.na(dfplot[[pcol]]))) {
+    keep <- rowSums(!is.na(dfplot[, groups, drop = FALSE])) > 0
+    message("No p-values available: showing all scored pathways")
   } else {
-    stop("Please insert one or maximus two pathway")
+    keep <- !is.na(dfplot[[pcol]]) & dfplot[[pcol]] < pval
   }
-  return(plot)
+  dfplot <- as.matrix(dfplot[keep, groups, drop = FALSE])
+  if (nrow(dfplot) == 0) {
+    message("No pathway with ", pcol, " < ", pval, ": nothing to plot")
+    return(invisible(NULL))
+  }
+
+  dfplot <- dfplot[.heat_order(dfplot), , drop = FALSE]
+  dfplot[is.na(dfplot)] <- 1
+  pheatmap(dfplot, cluster_cols = FALSE, cluster_rows = FALSE, color = colorRampPalette(col)(100),
+           breaks = .heat_breaks(dfplot), fontsize = txt.size, border_color = NA)
 }
 
 
-PathPlot <- function(mac_obj, pathway, txt.size=14, shade="turbo", split.by=NULL, pt.size=2, ncol=2, max.cutoff=NA) {
-  if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
-  if (is.null(mac_obj@PathAnalyzeR[[mac_obj@ident]][["SingleCell"]])) stop("Before PathHeatPlot() run PathAnalyzeR(mac_obj)")
+PathDisplay <- function(mac_obj, meta = mac_obj@ident) {
+  .check_obj(mac_obj)
+  res <- .single_cell_results(mac_obj, meta)
+  message("Pathways used for the ", meta, " pathway analysis:")
+  p <- colnames(res)
+  message(paste0(seq_along(p), " - ", p, collapse = "\n"))
+  invisible(data.frame(index = seq_along(p), pathway = p))
+}
 
-  all_pathway <- colnames(mac_obj@PathAnalyzeR[[mac_obj@ident]][["SingleCell"]])
-  if(length(all_pathway)<pathway) stop("Out of index, number of pathway is: ", length(all_pathway))
 
-  pathway <- colnames(mac_obj@PathAnalyzeR[[mac_obj@ident]][["SingleCell"]])[pathway]
+PathCart <- function(mac_obj, pathway, plot.by = mac_obj@ident, split.by = NULL, fill = TRUE, a = 0.1,
+                     col = NULL, txt.size = 15, ncol = 3, scale = TRUE) {
+  .check_obj(mac_obj)
+  res <- .single_cell_results(mac_obj, plot.by)
+  .check_col(mac_obj, split.by, "split.by")
+  pathway <- .pick_pathways(colnames(res), pathway)
+  if (length(pathway) > 2) stop("Please select one or two pathways", call. = FALSE)
 
-  dfplot <- cbind(mac_obj@MetaData, mac_obj@Reduction)
-  dfplot$PATH <- mac_obj@PathAnalyzeR[[mac_obj@ident]][["SingleCell"]][,pathway]
-  dfplot <- dfplot[order(dfplot$PATH, decreasing = F),]
+  dfplot <- mac_obj@MetaData
+  dfplot$.p1 <- res[[pathway[1]]]
+  if (length(pathway) == 2) dfplot$.p2 <- res[[pathway[2]]]
+  ok <- !is.na(dfplot$.p1)
+  if (length(pathway) == 2) ok <- ok & !is.na(dfplot$.p2)
+  dfplot <- dfplot[ok, , drop = FALSE]
+  if (nrow(dfplot) == 0) stop("The selected pathway(s) could not be scored", call. = FALSE)
 
-  lab <- colnames(dfplot)
+  lg <- .log_scores(dfplot, c(".p1", ".p2")[seq_along(pathway)], scale)
+  dfplot <- lg$data
+  if (nrow(dfplot) == 0) stop("No cell left to plot", call. = FALSE)
 
-  if(!is.na(max.cutoff)) {
-    if (max.cutoff<2) warning("It is not recommended to use a cutoff less than two")
-    dfplot[which(dfplot$PATH>max.cutoff),"PATH"] <- max.cutoff
+  if (length(pathway) == 1) {
+    plot <- ggplot(dfplot, aes(x = .data[[".p1"]], color = .data[[plot.by]])) +
+      labs(x = .axis_lab(pathway[1], scale), y = "", color = "", fill = "") +
+      geom_vline(xintercept = lg$ref, colour = "grey30")
+    plot <- if (fill) plot + geom_density(aes(fill = .data[[plot.by]]), alpha = a) else plot + geom_density()
+  } else {
+    plot <- ggplot(dfplot, aes(x = .data[[".p1"]], y = .data[[".p2"]])) +
+      labs(x = .axis_lab(pathway[1], scale), y = .axis_lab(pathway[2], scale),
+           color = plot.by, fill = plot.by) +
+      geom_vline(xintercept = lg$ref, colour = "grey30") +
+      geom_hline(yintercept = lg$ref, colour = "grey30")
+    plot <- if (fill) {
+      plot + stat_density_2d(aes(color = .data[[plot.by]], fill = .data[[plot.by]]),
+                             geom = "polygon", alpha = a, position = "identity")
+    } else {
+      plot + geom_density_2d(aes(color = .data[[plot.by]]))
+    }
   }
 
-  plot <- ggplot(dfplot, aes(x=dfplot[,ncol(dfplot)-2], y=dfplot[,ncol(dfplot)-1], color=PATH))+
-    labs(x = lab[ncol(dfplot)-2], y=lab[ncol(dfplot)-1], color="") +
-    ggtitle(pathway) +
-    geom_point(size=pt.size) +
-    theme(text = element_text(size = txt.size),
-          panel.background = element_blank(),
-          axis.text.x = element_text(color = "black"),
-          axis.text.y = element_text(color = "black"),
-          axis.line = element_line(),
-          strip.background = element_rect(color = "black")) +
+  plot <- plot + .mac_theme(txt.size)
+  if (.check_colors(col, dfplot[[plot.by]], "plot.by")) {
+    plot <- plot + scale_fill_manual(values = col) + scale_color_manual(values = col)
+  }
+  if (!is.null(split.by)) plot <- plot + facet_wrap(split.by, ncol = ncol)
+  plot
+}
+
+
+PathPlot <- function(mac_obj, pathway, txt.size = 14, shade = "turbo", split.by = NULL, pt.size = 2,
+                     ncol = 2, max.cutoff = NA, meta = mac_obj@ident) {
+  .check_obj(mac_obj)
+  res <- .single_cell_results(mac_obj, meta)
+  .check_col(mac_obj, split.by, "split.by")
+  pathway <- .pick_pathways(colnames(res), pathway)
+
+  emb <- .embedding(mac_obj)
+  base <- cbind(mac_obj@MetaData, emb$data)
+
+  ## long format: one block of cells per pathway
+  dfplot <- do.call(rbind, lapply(pathway, function(p) {
+    d <- base
+    d$.score <- res[[p]]
+    d$.pathway <- p
+    d
+  }))
+  dfplot$.pathway <- factor(dfplot$.pathway, levels = pathway)
+
+  if (!is.na(max.cutoff)) {
+    if (max.cutoff < 2) warning("A cutoff below 2 is not recommended", call. = FALSE)
+    dfplot$.score <- pmin(dfplot$.score, max.cutoff)
+  }
+  dfplot <- dfplot[order(dfplot$.score, na.last = FALSE), , drop = FALSE]
+
+  plot <- ggplot(dfplot, aes(x = .data[[".dim1"]], y = .data[[".dim2"]], color = .data[[".score"]])) +
+    geom_point(size = pt.size) +
+    labs(x = emb$labels[1], y = emb$labels[2], color = "Score") +
+    .mac_theme(txt.size) +
     scale_color_viridis_c(option = shade)
 
-  if(!is.null(split.by)) {
-    plot <- plot +
-      facet_wrap(split.by, ncol = ncol)
+  if (length(pathway) == 1) {
+    plot <- plot + ggtitle(pathway)
+    if (!is.null(split.by)) plot <- plot + facet_wrap(split.by, ncol = ncol)
+  } else if (is.null(split.by)) {
+    plot <- plot + facet_wrap(".pathway", ncol = ncol)
+  } else {
+    plot <- plot + facet_grid(stats::as.formula(paste0(".pathway ~ `", split.by, "`")))
   }
-
-  return(plot)
+  plot
 }
 
 ###############################################
 
-PathViolin <- function(mac_obj, pathway, plot.by=mac_obj@ident, txt.size = 15, ncol=1, col=NULL, intercept = NULL, stat=F) {
-  if (class(mac_obj)!="MACanalyzeR") stop("The input object is not a MACanalyzeR Object. Please insert a MACanalyzeR Object.
-  Create it with CreateMacObj() function.")
-  if (is.null(mac_obj@PathAnalyzeR[[plot.by]][["SingleCell"]])) stop("Before PathHeatPlot() run PathAnalyzeR(mac_obj, meta='",plot.by,"')")
+PathViolin <- function(mac_obj, pathway, plot.by = mac_obj@ident, txt.size = 15, ncol = 1, col = NULL,
+                       intercept = FALSE, stat = FALSE) {
+  .check_obj(mac_obj)
+  res <- .single_cell_results(mac_obj, plot.by)
+  pathway <- .pick_pathways(colnames(res), pathway)
+  if (is.null(intercept)) intercept <- FALSE
 
-  all_pathway <- colnames(mac_obj@PathAnalyzeR[[plot.by]][["SingleCell"]])
-  if(length(all_pathway)<max(pathway)) stop("Out of index, number of pathway is: ", length(all_pathway))
+  dfplot <- mac_obj@MetaData
+  dfplot[[plot.by]] <- factor(dfplot[[plot.by]])
+  use_col <- .check_colors(col, dfplot[[plot.by]], "plot.by")
 
-  pathway <- colnames(mac_obj@PathAnalyzeR[[plot.by]][["SingleCell"]])[pathway]
-  dfplot <- cbind(mac_obj@MetaData, mac_obj@PathAnalyzeR[[plot.by]][["SingleCell"]])
-  s <- ncol(dfplot)
-  plot <- list()
+  plot <- lapply(pathway, function(p) {
+    d <- dfplot
+    d$.score <- res[[p]]
+    d <- d[!is.na(d$.score) & !is.na(d[[plot.by]]), , drop = FALSE]
 
-  for (i in pathway) {
-    p1 <- eval(substitute(
-      ggplot(dfplot, aes(x=dfplot[,plot.by], y=dfplot[,i], fill = dfplot[,plot.by], color = dfplot[,plot.by])) +
-        geom_violin() +
-        geom_boxplot(width=0.3, color="grey30", alpha=0.2) +
-        labs(x="", y=i, color=plot.by, fill=plot.by) +
-        theme(text = element_text(size = txt.size),
-              panel.background = element_blank(),
-              axis.text.x = element_text(color = "black"),
-              axis.text.y = element_text(color = "black"),
-              axis.line = element_line(),
-              strip.background = element_rect(color = "black"),
-              legend.position="none")
-      ,list(i = i)))
+    p1 <- ggplot(d, aes(x = .data[[plot.by]], y = .data[[".score"]],
+                        fill = .data[[plot.by]], color = .data[[plot.by]])) +
+      geom_violin() +
+      geom_boxplot(width = 0.3, color = "grey30", alpha = 0.2) +
+      labs(x = "", y = p, color = plot.by, fill = plot.by) +
+      .mac_theme(txt.size) +
+      theme(legend.position = "none")
 
-    if (!is.null(intercept)) {
-      p1 <- p1 + geom_hline(yintercept = 1, colour = 'grey30')
-    }
-
-    if (!is.null(col)) {
-      if (length(col) == length(unique(dfplot[,plot.by]))) {
-        p1 <- p1 + scale_fill_manual(values = col) + scale_color_manual(values = col)
-      } else {
-        stop("Number of color must correspond number of ", plot.by, " : ", length(unique(dfplot[,plot.by])))
-      }
-    }
+    if (isTRUE(intercept)) p1 <- p1 + geom_hline(yintercept = 1, colour = "grey30")
+    if (use_col) p1 <- p1 + scale_fill_manual(values = col) + scale_color_manual(values = col)
 
     if (stat) {
-      permutazioni <- combn(unique(dfplot[,plot.by]), 2)
-      for (lung in 1:ncol(permutazioni)) {
-        p1 <- p1 + geom_signif(comparisons = list(as.vector(permutazioni[,lung])),
-                               map_signif_level = F, color="black", margin_top = 0.05+lung*0.1)
+      lev <- levels(droplevels(d[[plot.by]]))
+      if (length(lev) > 1) {
+        comp <- utils::combn(lev, 2, simplify = FALSE)
+        p1 <- p1 + geom_signif(comparisons = comp, map_signif_level = FALSE, color = "black",
+                               step_increase = 0.1)
       }
     }
+    p1
+  })
+  names(plot) <- pathway
 
-    plot[[i]] <- p1  # add each plot into plot list
-  }
-  grid.arrange(grobs=plot, ncol=ncol)
+  grid.arrange(grobs = plot, ncol = ncol)
 }
-
-
-
-

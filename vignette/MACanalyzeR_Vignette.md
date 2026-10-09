@@ -9,274 +9,359 @@ category: Vignettes
 -----------------------------------
 
 # MACanalyzeR
-*Macanalyzer* is an R package designed and developed for characterizing macrophages in single-cell RNA-seq data (scRNAseq). It provides three modules that enable in-depth analysis of this myeloid component.
+*MACanalyzeR* is an R package for the in-depth characterization of monocytes and macrophages in single-cell RNA-seq (scRNA-seq) data. Starting from a clustered `Seurat` object (mouse or human), it provides four analysis modules, each with its own plotting functions:
 
-**FoamSpotteR**: This module investigates the foamingness of macrophages. It is based on a machine learning model trained to recognize foamy macrophages from atherosclerotic plaques.
+| Module | Question it answers | Main function | Plots |
+|---|---|---|---|
+| **FoamSpotteR** | Which cells are foam-like (lipid-laden) macrophages? | `FoamSpotteR()` | `FoamPlot()`, `FoamLine()` |
+| **MacPolarizeR** | Are cells inflammatory, transitional or healing? | `MacPolarizeR()` | `MacBarplot()`, `MacRadar()`, `PolCart()` |
+| **PathAnalyzeR** | Which pathways are active in each group and in each cell? | `PathAnalyzeR()` | `PathHeat()`, `PathCart()`, `PathPlot()`, `PathViolin()` |
+| **MitoScanneR** | What is the mitochondrial and metabolic profile? | `MitoScanneR()` | `HeatMito()`, `MitoBalance()`, `GliOxBalance()`, `GeneBalance()` |
 
-**MacPolarizeR**: This module investigates macrophage polarization. It is based on a clustering method built on pro- and anti-inflammatory genes.
+In addition, `macSpectrum()` places cells on the MacSpectrum and AtheroSpectrum activation maps.
 
-**PathAnalyzeR**: This module calculates a score for each condition or single cell to allow comparison of pathways.
-
-The package is available on GitHub at [andreeedna/MACanalyzeR](https://github.com/andreeedna/MACanalyzeR):
+The package is available on GitHub at [andreeedna/MACanalyzeR](https://github.com/andreeedna/MACanalyzeR).
 
 ## Cite MACanalyzeR
-If you use *MACanalyzeR* don't forget to cite the relative paper:
->**Characterization of Monocyto Macrophages in Obese Brown Adipose Tissue** Ninni A., Zaccaria F., Verteramo L., Sciarretta F. and Lettieri-Barbato D.
+If you use *MACanalyzeR* don't forget to cite the paper:
+>**MACanalyzeR scRNAseq analysis tool reveals PPARγ<sup>HIGH</sup>/GDF15<sup>HIGH</sup> lipid-associated macrophages facilitate thermogenic expansion in BAT** Ninni A., Zaccaria F., Verteramo L., Sciarretta F. *et al.* & Lettieri-Barbato D. *Nature Communications* 16, 5063 (2025). [doi:10.1038/s41467-025-60295-2](https://doi.org/10.1038/s41467-025-60295-2)
 
 ## Installation
-To ensure a correct functionality, it’s essential to set up the required dependencies.
-Below are the steps to install them:
+Install the dependencies from CRAN:
 ``` r
-if (!requireNamespace("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-
-BiocManager::install(c("ggplot2", "ggpubr", "gridExtra", "pheatmap", "caret"))
+install.packages(c("ggplot2", "ggpubr", "gridExtra", "pheatmap",
+                   "caret", "randomForest", "Matrix", "SeuratObject"))
 ```
-The development version of `MACanalyzeR` can be installed using the `devtools` package:
-
+Then install the development version of `MACanalyzeR` from GitHub with `devtools`:
 ``` r
 if (!requireNamespace("devtools", quietly = TRUE))
     install.packages("devtools")
 
 devtools::install_github("andreeedna/MACanalyzeR")
-```
-The latest stable release can also be installed from the BioConductor repository \[NOT PUBLISHED YET\]:
-``` r
-BiocManager::install("MACanalyzeR")
+library(MACanalyzeR)
 ```
 
-## Create MACanalyzeR object
-*MACanalyzeR* employs a package-specific R object to store both the data and the results of the analysis. Given the widespread adoption of Seurat in single-cell analysis, there is a convenient function to instantiate an object directly from a Seurat one. It is *highly recommended* to utilize a preprocessed `Seurat` object containing only clustered monocyte/macrophages and desired metadata as input to ensure maximum compatibility.  
->MACanalyzeR is compatible with Seurat v4 and v5
+-----------------------------------
 
-The `CreateMacObj()` function creates a MACanalyzeR object from a Seurat object. It extracts the information from the Seurat metadata. It supports the following parameters:
+## 1. Create the MACanalyzeR object
+*MACanalyzeR* stores data and results in its own object. The `CreateMacObj()` function builds it from a `Seurat` object (v4 or v5). It is *highly recommended* to use a preprocessed (normalized, reduced and clustered) `Seurat` object containing **only monocytes/macrophages**, with all genes (not only the variable features).
+
+Arguments:
 - `seurat_obj`: the Seurat object;
+- `id`: metadata column with clusters or cell annotations. It becomes the **default grouping** used by the `plot.by` and `meta` arguments of all the other functions (default `"seurat_clusters"`);
+- `reduction`: reduction used for plotting, e.g. `"umap"` or `"tsne"` (default `"umap"`). Only the first two dimensions are kept;
+- `org`: organism, `"mm"` (mouse, default) or `"hs"` (human). It selects the organism-specific models and gene sets;
+- `assay`: assay to use (default: the default assay of the Seurat object, e.g. `"RNA"` or `"SCT"`);
+- `sparse`: keep the expression matrix sparse to save memory (default `TRUE`).
 
--   `sample`: column name in the Seurat object’s metadata containing the experimental design for the differential analysis;
-
--   `cluster`: the column name in the Seurat object’s metadata storing cluster information or cell annotations;
-
--   `reduction`:  the name of the reduction utilized for cell visualization;
 ``` r
-seurat_obj <- readRDS("vignette/mac.rds")
+seurat_obj <- readRDS("mac.rds")
 head(seurat_obj@meta.data)
 
-mac_obj <- CreateMacObj(seurat_obj = seurat_obj,
-						sample = "Sample",
-						cluster = "Cells",
-						reduction = "umap"
-						)
+mac_obj <- CreateMacObj(seurat_obj,
+                        id = "Cells",
+                        reduction = "umap",
+                        org = "mm")
+mac_obj
 ```
-    ##	Seurat version: 5.0.1
-    ##	Warning in asMethod(object): sparse->dense coercion: allocating vector of size 1.3 GiB
+    ##  An object of class MACanalyzeR (v1.1.0)
+    ##  <n> features across <n> cells - Mus musculus
+    ##  Default grouping: Cells
+    ##  FoamSpotteR: not run | MacPolarizeR: not run
 
-The MACanalyzeR object will have four main metadata:
-- Sample: The experimental design
-- Cluster: The macrophage subtypes (or any other annotation)
-- Foam: The FoamSpotteR() classification
-- Mac: The MacPolarizeR() classification
+> With Seurat v5, if the `data` layer is split (e.g. after integration), join it first with `seurat_obj <- SeuratObject::JoinLayers(seurat_obj)`.
 
-> In the MACanalyzeR functions, the `plot.by` and `meta` flags take one of these four arguments as input (the name used in the Seurat object is not preserved!)  
-### Visualize MACanalyzeR object
-The MACanalyzeR object can be plotted with `MacPlot()` function. This function creates a 2D scatter plot for visualizing single-cell. Each point in the plot represents a cell, positioned based on its embedding coordinates obtained from a dimensionality reduction technique.
-```
-MacPlot(mac_obj,
-		plot.by="Cluster",
-		pt.size=2,
-		txt.size=17)
-```
-![]()
-The MacPlot can be also splitted by one of the metadata
-```
-MacPlot(mac_obj, split.by="Sample")
-```
-![]()
+**Output.** The object contains the normalized expression (`mac_obj@CountData`), the embedding (`mac_obj@Reduction`) and the cell metadata (`mac_obj@MetaData`). All the metadata columns of the Seurat object are kept **with their original names** (in this example `Sample`, the experimental condition, and `Cells`, the macrophage subtypes): any of them can be passed to `plot.by`, `split.by` and `meta`. The modules add new columns (`Foam`, `fMAC+`, `Mac`, ...) and fill the slots `@MacPolarizeR`, `@PathAnalyzeR` and `@MitoScanneR`.
 
-## *FoamSpotteR*: Foaming-like Macrophage Classification
-The *FoamSpotteR* module enables the identification of cells exhibiting foam-like characteristics within scRNAseq data. This module employs a `randomforest` binary classifier on the data, assigning a label (**fMAC+** for foam-like macrophage and **fMAC-** for non foam-like macrophage) to each cell. Additionally, it computes a score, `FoamDEX`, for each cell, representing the probability of being a foam-like macrophage.  
+A human example dataset of monocytes/macrophages is shipped with the package:
+``` r
+human_obj <- readRDS(system.file("extdata", "mono_macs_human.rds", package = "MACanalyzeR"))
+```
 
-> The use of this module is recommended on myeloid cells, as foam cells are a typical phenotype of this cell type under certain conditions.
+### Visualize the object: `MacPlot()`
+`MacPlot()` draws the cells on the embedding, coloured by any metadata column.
+
+- `plot.by`: column used for the colours (default: the `id` grouping);
+- `split.by`: optional column used to split the plot into panels (with `ncol` columns);
+- `pt.size`, `txt.size`: point and text size;
+- `col`: optional vector with one colour per group.
+
+``` r
+MacPlot(mac_obj)                                   # coloured by the default grouping
+MacPlot(mac_obj, plot.by = "Sample", pt.size = 1)  # coloured by condition
+MacPlot(mac_obj, plot.by = "Cells", split.by = "Sample", ncol = 2)
+```
+All plotting functions return a `ggplot` object (except heatmaps and `PathViolin()`), so they can be further customized with `ggplot2` and saved with `ggsave()`.
+
+-----------------------------------
+
+## 2. *FoamSpotteR*: foam-like macrophages
+*FoamSpotteR* identifies cells with a foam-like (lipid-laden) phenotype. A random forest classifier, trained on foamy and non-foamy macrophages from atherosclerotic plaques, assigns each cell to **fMAC+** (foam-like) or **fMAC-** and computes the **FoamDEX**, the probability (0-1) of being a foam-like macrophage.
 
 ``` r
 mac_obj <- FoamSpotteR(mac_obj)
 ```
-The details regarding the `FoamDEX` score and the prediction results are stored in the MACanalyzeR object, at `mac_obj@FoamSpotteR`.
+    ##  FoamSpotteR: <n> fMAC+ and <n> fMAC- cells
+
+- `max.missing`: maximum fraction of model genes that may be missing from the data (default `0.1`); missing genes are set to 0 with a warning. Use `0` to require all of them.
+
+**Output.** Three new columns in `mac_obj@MetaData`:
+- `Foam`: predicted class (`fMAC+` / `fMAC-`);
+- `fMAC+`: the FoamDEX;
+- `fMAC-`: `1 - FoamDEX`.
+
+``` r
+table(mac_obj@MetaData$Sample, mac_obj@MetaData$Foam)
+```
 
 ### Visualize FoamSpotteR results
-To visualize the *FoamSpotteR* prediction, *MACanalyzeR* integrates a series of plotting functionalities. Here’s a guide on how to plot the prediction results.
-A basic approach for visualizing fMAC+/fMAC- classification is through the `MacPlot()` function:
+The classification can be shown on the embedding with `MacPlot()`:
 ``` r
 MacPlot(mac_obj, plot.by = "Foam")
 ```
-![]()
 
-We can improve the visualization of the prediction by plotting the FoamDEX on the plot. This functionality is enabled via the `FoamPlot()` function:
+`FoamPlot()` colours each cell by its FoamDEX (cells with the highest values on top; colour scale fixed between 0 and 1). `shade` sets the viridis palette (`"magma"`, `"inferno"`, `"plasma"`, `"viridis"`, `"cividis"`, `"rocket"`, `"mako"`, `"turbo"`).
 ``` r
 FoamPlot(mac_obj)
+FoamPlot(mac_obj, split.by = "Sample", shade = "magma", pt.size = 1.5)
 ```
-![]()
-> The FoamDEX is a probability score! It is a value between 0 and 1
 
-The `FoamPlot()` function offers functionality similar to `MacPlot()`, enabling customization of point size, font size, and data splitting based on a chosen metadata.
+`FoamLine()` compares the FoamDEX distribution between groups with one density curve per group (curves scaled to the same height). Use `fill = FALSE` for lines only, `a` for the transparency and `col` for custom colours.
 ``` r
-FoamPlot(mac_obj,
-		 split.by = "Sample",
-		 shade="magma",
-		 txt.size= 17,
-		 pt.size=1.5
-		 )
+FoamLine(mac_obj, plot.by = "Sample")
+FoamLine(mac_obj, plot.by = "Cells", split.by = "Sample", fill = FALSE)
 ```
-![]()
 
-An additional feature to visualize the distribution of FoamDEX values. The `FoamLine()` function creates density plot for either individual samples or clusters. This graphical representation allows users to easily compare how FoamDEX levels are spread across different conditions, providing insights into potential variations.
-``` r
-FoamLine(mac_obj,
-		 plot.by = "Sample",
-		 fill=T,
-		 a=0.05
-		 )
-```
-![]()
+-----------------------------------
 
-## *MacPolarizeR*: Macrophages Polarization Analysis
-The *MacPolarizeR* module classify monocytes and macrophages based on their polarization phenotype. This module operates by clustering cells according to the expression of genes associated with M1 and M2 polarization and cluster cells into 3 different class: inflammatory (*M1-like*), healing (*M2-like*), and transitional (*M0-like*).
-In addition to classification, *MacPolarizeR* calculates an M1 and M2 polarization score for each cell based on the expression of the gene markers. This score system facilitates a more comprehensive and nuanced characterization of macrophages polarization state.
+## 3. *MacPolarizeR*: macrophage polarization
+*MacPolarizeR* classifies cells along the M1 (pro-inflammatory) / M2 (anti-inflammatory) axis:
+
+1. each cell gets an **M1 and an M2 score** from curated marker genes (1 = average of the dataset);
+2. the **polarization balance** `z(M1) - z(M2)` is computed, which removes the activation shared by both programs;
+3. cells are split by k-means into three states: **Inflammatory** (M1-like), **Transitional** and **Healing** (M2-like);
+4. marker genes are resampled to measure how **stable** each assignment is.
+
 ``` r
 mac_obj <- MacPolarizeR(mac_obj)
 ```
-The outupt of the cell polarization clustering are stored within the metadata of the MACanalyzer object accessible at `mac_obj@MetaData$Mac` and the polarization score is accessible at `mac_obj@MacPolarizeR`.
+    ##  MacPolarizeR: Inflammatory = <n>, Transitional = <n>, Healing = <n> | mean stability <x>
 
-### Visualize MacPolarizeR result
-A basic way for visualizing MacPolarizeR classification is through the `MacPlot()` function:
-> MacPolarizeR implements preset colors for the three polarization classes
-> Inflammatory - #C5283D, Transitional - #E9724C", Healing - #FFC857
+- `seed`: random seed, so the result is identical at every run (default `42`); the RNG state of your session is not changed;
+- `nstart`: number of k-means starts (default `25`);
+- `n.boot`: number of bootstrap replicates for the stability (default `20`; `0` to skip).
+
+**Output.**
+- `mac_obj@MetaData$Mac`: polarization state of each cell;
+- `mac_obj@MetaData$Mac.stability`: fraction of replicates confirming the assignment (low values = cells between two states);
+- `mac_obj@MacPolarizeR$SingleCell`: M1 and M2 scores of each cell;
+- `mac_obj@MacPolarizeR$Total`: mean M1 and M2 scores of each state.
+
+``` r
+table(mac_obj@MetaData$Sample, mac_obj@MetaData$Mac)
+summary(mac_obj@MetaData$Mac.stability)
+
+# keep only confidently assigned cells
+confident <- mac_obj@MetaData$Mac.stability >= 0.8
+```
+
+### Visualize MacPolarizeR results
+`MacPlot()` uses a preset palette for the three states:
 ``` r
 MacPlot(mac_obj, plot.by = "Mac")
-```
-![]()
-
-``` r
 MacPlot(mac_obj, plot.by = "Mac", split.by = "Sample")
 ```
-![]()
 
-It’s also possible to represent the proportion of the 3 phenotypes for metadata through barplots:
+`MacBarplot()` shows the percentage of each state in each group:
 ``` r
 MacBarplot(mac_obj, plot.by = "Sample")
 ```
-![]()
 
-or using a radarplot:
+`MacRadar()` draws a circular barplot: one slice per group, with the number of cells coloured by state. `sort = TRUE` orders the groups by size.
 ``` r
-MacRadar(mac_obj, plot.by = "Sample")
+MacRadar(mac_obj, plot.by = "Cells", sort = TRUE)
+MacRadar(mac_obj, plot.by = "Cells", split.by = "Sample")
 ```
-![]()
+> In `MacBarplot()` and `MacRadar()`, `col` takes three colours for Inflammatory, Transitional and Healing.
 
-*Will be implemented a function for polarization score plotting
-## *PathAnalyzeR*: Pathway Enrichment Analysis
-The *PathAnalyzeR* module enables the enrichment analysis of cells based on gene expression. The function `PathAnalyzeR()` performs an enrichment analysis for each cell individually and computes a score for each cluster or sample. The technique for calculating the enrichment score for each gene set is elaborated in the MACanalyzeR paper. This function allows the following arguments:
-
-- `mac_obj`: the MACanalyzeR object
-
--   `meta`: the metadata used to perform the patway analysis
-
--   `pathway`:  a list of pathways of interest. Each element must be a vector containing the genes involved in a pathway. These vectors must be named with the corresponding pathway names. By default, it uses a subset of KEGG pathways of interest in biological processes or cellular components of macrophages.
-
-> A collection of KEGG, GO and Reactome for mouse (*Mus musculus*) is already incorporated into the package. However, users have the flexibility to utilize any category extracted from other databases by providing a list of genes with a named pathway associated.
+`PolCart()` places each cell on the M1 score (x) vs M2 score (y) plane, as 2D density contours (`style = "density"`) or points (`style = "point"`). By default scores are shown on a **log2 scale** (`scale = TRUE`): reference lines at 0 split the plane into four quadrants (low/high M1, low/high M2), and +1/-1 mean twice/half the average. Use `scale = FALSE` for the original scores (reference lines at 1).
 ``` r
-mac_obj <- PathAnalyzeR(mac_obj)
+PolCart(mac_obj, plot.by = "Sample")
+PolCart(mac_obj, plot.by = "Mac", style = "point")
+PolCart(mac_obj, plot.by = "Sample", split.by = "Cells", fill = FALSE, scale = FALSE)
 ```
-PathAnalyzeR allows you to define custom pathways for analysis. These pathways can be:
-- Subsets of existing databases like KEGG, Gene Ontology (GO), and Reactome pathways (which are already implemented as lists in MACanalyzeR);
-- User-created pathways: you can build your own pathway by specifying a list of genes;
+
+-----------------------------------
+
+## 4. *PathAnalyzeR*: pathway scores
+*PathAnalyzeR* scores gene sets both **per group** and **per cell**. For each pathway, the expression of each gene is divided by its average across the groups of `meta`, and the ratios are averaged weighting each gene by its variance. A score of **1 means average activity**, above 1 higher and below 1 lower activity (details in the paper).
+
+Arguments:
+- `pathway`: a named list of gene vectors (default: a curated selection of 26 macrophage-relevant KEGG pathways). A single gene vector is also accepted;
+- `meta`: the metadata column defining the groups (default: the `id` grouping);
+- `verbose`: show the progress bar.
+
 ``` r
-# subset of KEGG, GO or REACTOME
-ptw <- kegg[c(1:10)]
-ptw <- go[c(1:10)]
-ptw <- reactome[c(1:10)]
-
-# user-created pathways
-ptw <- list("path_name1" = c(...),
-			"path_name2" = c(...),
-			...
-			)
-
-# PathAnalyzeR performed on Cluster
-mac_obj <- PathAnalyzeR(mac_obj, pathway=ptw, meta="Cluster")
+mac_obj <- PathAnalyzeR(mac_obj, meta = "Sample")
 ```
+
+Pathways with fewer than 5 detected genes (or fewer than 3 genes expressed in every group) are skipped and reported.
+
+**Output.** `mac_obj@PathAnalyzeR[["Sample"]]`, a list of two data frames:
+- `Total`: score of each pathway in each group, plus `pval` and `padj` (Benjamini-Hochberg). The p-value tests whether the pathway differs between groups (Wilcoxon signed-rank test with 2 groups, Friedman test with 3 or more);
+- `SingleCell`: score of each pathway in each cell.
+
+``` r
+res <- mac_obj@PathAnalyzeR$Sample$Total
+res[order(res$padj), ]
+```
+
+Results are stored by grouping, so you can run `PathAnalyzeR()` on several groupings and keep all of them. The plotting functions look them up by the same name: to plot by `"Cells"`, first run `PathAnalyzeR(mac_obj, meta = "Cells")`.
+
+### Choosing the pathways
+Any named list of gene vectors can be used. Several collections are included:
+``` r
+# subsets of the built-in KEGG, GO and Reactome collections (mouse)
+ptw <- mouse_kegg[1:10]
+ptw <- mouse_go[grep("MACROPHAGE", names(mouse_go))]
+ptw <- mouse_reactome[1:10]
+
+# MSigDB collections, available offline with PathCreatoR()
+PathCreatoR("mm")                                   # list the available collections
+ptw <- PathCreatoR("mm", "MH")                      # hallmark
+ptw <- PathCreatoR("mm", "GO:BP", pattern = "lipid|foam", min.size = 10, max.size = 300)
+ptw <- PathCreatoR("hs", "KEGG_LEGACY")             # human KEGG
+
+# user-defined gene sets
+ptw <- list("Lipid uptake"  = c("Cd36", "Lpl", "Msr1", "Scarb1", "Ldlr"),
+            "LAM signature" = c("Trem2", "Gpnmb", "Lgals3", "Cd9", "Spp1"))
+
+mac_obj <- PathAnalyzeR(mac_obj, pathway = ptw, meta = "Cells")
+```
+> `PathCreatoR()` matching is case-insensitive, accepts the last part of the name (`"GO:BP"`) and human codes for mouse (`"C5:GO:BP"`). Gene symbols must match the organism of the data.
+
 ### Visualize PathAnalyzeR results
-
-To visualize the results of *PathAnalyzeR* enrichment, *MACanalyzeR* provides various functions for both per-metadata and single-cell analysis.
-
-`PathHeat()` function plots the results of *PathAnalyzeR* metadata analysis as an heatmap that allows a general view of the enriched pathways between the specified groups:
+`PathHeat()` shows the group-level scores as a heatmap (centred on 1), keeping only pathways with `pval` below the threshold (`adjust = TRUE` to filter on `padj`):
 ``` r
 PathHeat(mac_obj, plot.by = "Sample")
-PathHeat(mac_obj, plot.by = "Cluster")
+PathHeat(mac_obj, plot.by = "Sample", pval = 0.01, adjust = TRUE)
 ```
-![]()
-> Before plotting PathHeat for a specific metadata, you must first launch `PathAnalyzeR()` function with the appropriate `meta` flag corresponding to that metadata.
 
-In *PathAnalyzeR* enrichment single-cell visualization, all functions use pathway identifiers in form of numbers (subsequent functions will also reference pathways using these numbers). To establish this association between pathways and their corresponding numbers, the `PathDisplay()` function is implemented.
+The single-cell plots select pathways by **number** or by **name**. `PathDisplay()` lists the numbers:
 ``` r
 PathDisplay(mac_obj, meta = "Sample")
 ```
-> In the next functions, the `pathway` flag will always correspond to the pathways' number you choose to visualize using the `PathDisplay()` function. For educational purposes, we'll focus on pathways related to OXPHOS (#1) and Glycolysis (#2).
+    ##  Pathways used for the Sample pathway analysis:
+    ##  1 - GLYCOLYSIS_GLUCONEOGENESIS
+    ##  2 - CITRATE_CYCLE_TCA_CYCLE
+    ##  ...
+    ##  5 - OXIDATIVE_PHOSPHORYLATION
 
-PathAnalyzeR implement a novel and unconventional visualization approach called Cartplot, which utilizes 2D density plots. The `PathCart()` function allows to simultaneously observe the expression distribution of two pathways at the single-cell level. This unique visualization provides valuable insights into the coordinated upregulation of pathways within the context of the analyzed metadata.
+`PathCart()` draws the **Cartplot**: the single-cell scores of two pathways on the x and y axes, as 2D densities coloured by group, showing cells in which both pathways are co-upregulated. With one pathway it draws a 1D density. As in `PolCart()`, scores are on a **log2 scale** by default (`scale = TRUE`, reference lines at 0); use `scale = FALSE` for the original scores.
 ``` r
-PathCart(mac_obj,
-		 plot.by = "Sample",
-		 pathway = c(1, 2),
-		 fill = T
-		 )
-```
-![]()
-> Is available also single pathway density plot, specifying one number in the `pathway` flag
-
-Through the `PathPlot()` function, we can visualize the enrichment score for each cell independently within a MacPlot. This enables the visualization of pathway enrichment patterns across the entire cell embedding.
-``` r
-## base PathPlot
-PathPlot(mac_obj, pathway = c(1,2))
-
-## splitted PathPlot
-PathPlot(mac_obj,
-				 pathway = c(1,2),
-				 split.by="Sample"
-				 )
-```
-![]()
-
-Another interesting way to visualize the expression of single-cell pathways is with violin plots. The `PathViolin()` function allows you to visualize the distribution of expression for individual pathways and enables statistical comparisons between these expressions across different metadata.
-``` r
-PathViolin(mac_obj,
-					 plot.by = "Sample",
-					 pathway = c(1,2))
+PathCart(mac_obj, pathway = c(5, 1), plot.by = "Sample")
+PathCart(mac_obj, pathway = "OXIDATIVE_PHOSPHORYLATION", plot.by = "Sample", fill = FALSE)
+PathCart(mac_obj, pathway = c(5, 1), plot.by = "Sample", split.by = "Cells", scale = FALSE)
 ```
 
-![]()
+`PathPlot()` colours the cells on the embedding by their score for one or more pathways (one panel each). `max.cutoff` caps extreme values so that a few cells do not compress the colour scale.
+``` r
+PathPlot(mac_obj, pathway = 5, meta = "Sample")
+PathPlot(mac_obj, pathway = c(5, 1), meta = "Sample", max.cutoff = 3)
+PathPlot(mac_obj, pathway = 5, meta = "Sample", split.by = "Sample")
+```
 
-## *MitoScanneR*: Mitochondrial Characterization
+`PathViolin()` compares the single-cell scores between groups with violin plots. `stat = TRUE` adds the p-values of all pairwise Wilcoxon tests, `intercept = TRUE` a reference line at 1.
+``` r
+PathViolin(mac_obj, pathway = c(5, 1), plot.by = "Sample", ncol = 2)
+PathViolin(mac_obj, pathway = 5, plot.by = "Sample", stat = TRUE, intercept = TRUE)
+```
 
-The *MitoScanneR* module of MACanalyzeR is dedicated to the analysis of the oxidative and mitochondrial profile. This module allows the identification of cells with high oxidative and mitochondrial activity. It is based on PathAnalyzeR pathway score on MitoCarta.
-> This version of MACanalyzeR uses pathway from MitoCarta 3.0
+-----------------------------------
+
+## 5. *MitoScanneR*: mitochondrial profile
+*MitoScanneR* applies the PathAnalyzeR scoring to the pathways of **MitoCarta 3.0**, organized in its main categories (OXPHOS, Metabolism, Mitochondrial central dogma, Protein import, Mitochondrial dynamics, ...).
 ``` r
 mac_obj <- MitoScanneR(mac_obj, meta = "Sample")
 ```
+**Output.** `mac_obj@MitoScanneR[["Sample"]]`: one data frame (pathways x groups) per MitoCarta category.
+``` r
+names(mac_obj@MitoScanneR$Sample)
+head(mac_obj@MitoScanneR$Sample$OXPHOS)
+```
+
 ### Visualize MitoScanneR results
-`HeatMito()` function allows to visualize the oxidative and mitochondrial activity of cells in a heatmap for a series the different MitoCarta pathways. The `plot.by` argument specifies the group to be analyzed (e.g., “Sample” or “Cluster”), passed to `MitoScanner`.
+`HeatMito()` draws one heatmap per MitoCarta category (`plot.by` must match the `meta` used in `MitoScanneR()`):
 ``` r
 HeatMito(mac_obj, plot.by = "Sample")
 ```
-![]()
 
-The `MitoBalance()` function generates a violin plot to visualize potential shifts in the expression levels of mitochondrial and mitonuclear genes. This plot depicts the ratio between the expression of these two gene types.
-``` r
-MitoBalance(mac_obj, plot.by = "Sample")
-```
-![]()
+### Metabolic balances
+These functions compare two gene sets **in each cell** and plot `log10(score set1 / score set2)` as violin plots per group (0 = balanced; `intercept = TRUE` draws the line at 0). They do not need `MitoScanneR()` to be run first.
 
-The `GliOxBalance()` function determine whether there is a shift in the expression of genes related to glycolytic or oxidative phosphorylation.
+`MitoBalance()` compares the mitochondrially encoded OXPHOS subunits with the nuclear-encoded ones (positive = relative excess of mitochondrial subunits):
 ``` r
-GliOxBalance(mac_obj, plot.by = "Sample")
+MitoBalance(mac_obj, plot.by = "Sample", intercept = TRUE)
 ```
-![]()
+> The 13 mitochondrial genes (`mt-` in mouse, `MT-` in human) are often removed during QC: keep them in the Seurat object to use `MitoBalance()`.
+
+`GliOxBalance()` compares glycolysis with oxidative phosphorylation (positive = glycolytic, negative = oxidative):
+``` r
+GliOxBalance(mac_obj, plot.by = "Sample", intercept = TRUE)
+GliOxBalance(mac_obj, plot.by = "Mac", split.by = "Sample")
+```
+
+`GeneBalance()` does the same for **any pair of gene sets**:
+``` r
+sel <- mouse_selected
+GeneBalance(mac_obj,
+            set1 = sel$GLYCOLYSIS_GLUCONEOGENESIS,
+            set2 = sel$FATTY_ACID_METABOLISM,
+            plot.by = "Sample", intercept = TRUE,
+            ylab = "log10(glycolysis / FAO)")
+```
+
+-----------------------------------
+
+## 6. MacSpectrum and AtheroSpectrum
+`macSpectrum()` places each cell on two activation maps, based on its similarity to reference macrophage profiles:
+- `mode = "macspectrum"`: **MPI** (polarization index; M1-like positive, M2-like negative) vs **AMDI** (activation-induced differentiation index);
+- `mode = "atherospectrum"`: **MPI** vs **MDFI** (foaming index; foamy-like positive, control-like negative).
+
+``` r
+macSpectrum(mac_obj, plot.by = "Sample")
+macSpectrum(mac_obj, mode = "atherospectrum", plot.by = "Cells", style = "point")
+```
+
+`MacSpectrumIndex()` stores the three indices in the metadata, to reuse or export them:
+``` r
+mac_obj <- MacSpectrumIndex(mac_obj)
+summary(mac_obj@MetaData[, c("MPI", "AMDI", "MDFI")])
+```
+
+-----------------------------------
+
+## Combining the modules
+Every result is a metadata column, so modules can be combined freely, e.g. pathways in foam-like vs non-foam-like cells, or metabolism in each polarization state:
+``` r
+mac_obj <- PathAnalyzeR(mac_obj, meta = "Foam")
+PathHeat(mac_obj, plot.by = "Foam")
+
+mac_obj <- PathAnalyzeR(mac_obj, meta = "Mac")
+PathViolin(mac_obj, pathway = "OXIDATIVE_PHOSPHORYLATION", plot.by = "Mac", stat = TRUE)
+
+# export all per-cell results
+write.csv(mac_obj@MetaData, "MACanalyzeR_cell_results.csv")
+```
+
+## Reference data
+The gene sets and models used by the package can be inspected directly (see `?"MACanalyzeR-data"`):
+
+| Object | Content |
+|---|---|
+| `mouse_selected`, `human_selected` | Default PathAnalyzeR pathways (macrophage-relevant KEGG) |
+| `mouse_kegg`, `mouse_go`, `mouse_reactome` | Mouse KEGG, GO and Reactome pathways |
+| `gsea_mouse`, `gsea_human` | MSigDB collections (via `PathCreatoR()`) |
+| `mouse_MitoCarta`, `human_MitoCarta` | MitoCarta 3.0 pathways |
+| `mouse_PolGenes`, `human_PolGenes` | M1 and M2 marker genes |
+| `mouse_LAMprey`, `human_LAMprey` | FoamSpotteR random forest models |

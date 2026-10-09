@@ -1,25 +1,37 @@
 Package: MACanalyzeR
 Type: Package
-Title: Tool for Single Cell analysis of Macrophages
-Version: 1.0.0
-Author: Andrea Ninni - PhD student
-Maintainer: <andrea.ninni@uniroma2.it>
-Description: A tool that perform macrophages characterization in scRNAseq data
+Title: Tool for Single-Cell Analysis of Macrophages
+Version: 1.1.0
+Authors@R: c(
+    person("Andrea", "Ninni", email = "andrea.ninni@uniroma2.it", role = c("aut", "cre")),
+    person("Fabio", "Zaccaria", role = "ctb"),
+    person("Luca", "Verteramo", role = "ctb"),
+    person("Francesca", "Sciarretta", role = "ctb"))
+Description: Characterization of monocytes and macrophages in single-cell RNA-seq data:
+    identification of foam-like macrophages (FoamSpotteR), polarization analysis (MacPolarizeR),
+    pathway scoring at group and single-cell level (PathAnalyzeR) and mitochondrial profiling
+    (MitoScanneR), starting from a Seurat object.
 License: tSNEland
 Encoding: UTF-8
 LazyData: true
+Depends:
+    R (>= 4.1.0)
 Imports:
     methods,
     utils,
     stats,
-    ggplot2,
+    ggplot2 (>= 3.3.0),
     ggpubr,
     gridExtra,
     pheatmap,
     grDevices,
     caret,
-    randomForest
-Suggests: 
+    randomForest,
+    Matrix,
+    rlang
+Suggests:
+    SeuratObject (>= 4.0.0),
     knitr,
     rmarkdown
-
+URL: https://github.com/andreeedna/MACanalyzeR
+BugReports: https://github.com/andreeedna/MACanalyzeR/issues
