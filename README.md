@@ -1,4 +1,3 @@
-<div align="center">
 
 # MACanalyzeR
 
@@ -13,8 +12,6 @@
 ![Seurat](https://img.shields.io/badge/Seurat-v4%20%7C%20v5-6a4c93?style=flat-square)
 ![Organisms](https://img.shields.io/badge/organisms-mouse%20%7C%20human-e07a5f?style=flat-square)
 ![Version](https://img.shields.io/badge/version-1.1.0-lightgrey?style=flat-square)
-
-</div>
 
 ---
 
