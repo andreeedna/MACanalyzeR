@@ -1,3 +1,5 @@
+<div align="center">
+
 # MACanalyzeR
 
 ### Single-cell characterization of macrophages in R
@@ -12,9 +14,25 @@
 ![Organisms](https://img.shields.io/badge/organisms-mouse%20%7C%20human-e07a5f?style=flat-square)
 ![Version](https://img.shields.io/badge/version-1.1.0-lightgrey?style=flat-square)
 
+</div>
+
 ---
 
 **MACanalyzeR** is an R package for the in-depth characterization of macrophages in single-cell RNA-seq (scRNA-seq) data. Starting from a clustered `Seurat` object, it spots foam-like macrophages with a machine-learning classifier, assigns pro- and anti-inflammatory polarization states, scores pathways at single-cell and group level, and profiles mitochondrial and oxidative metabolism — with publication-ready plots for every step.
+
+## 🆕 What's new in v1.1.0
+
+| | Change |
+|---|---|
+| 🧭 **MacPolarizeR** | New reproducible algorithm: k-means on the M1/M2 polarization balance with a fixed seed and multiple starts. Same result at every run, plus a per-cell `Mac.stability` score |
+| 📈 **PathCart / PolCart** | Scores shown on a **log2 scale** by default (`scale = TRUE`), with `log2(...)` axis labels and reference lines at 0 |
+| 🛤️ **PathCreatoR** | Fixed (it always failed); lists the available MSigDB collections and filters gene sets by name and size |
+| ⚖️ **GeneBalance** | New: per-cell balance between any two gene sets. `MitoBalance()` and `GliOxBalance()` now work with any grouping |
+| 📊 **PathAnalyzeR** | 5-15x faster with identical scores; correct p-value with 3+ groups (Friedman test) and BH-adjusted `padj` |
+| 💾 **Memory** | Sparse matrices are kept sparse; Seurat v5 layers and any assay supported |
+| 🐞 **Bug fixes** | `PathPlot()` with several pathways, PCA reductions, duplicated FoamSpotteR columns, clearer error messages |
+
+Full details in [NEWS.md](NEWS.md).
 
 ## ✨ Modules
 
@@ -102,7 +120,7 @@ my_pathways <- list(
 mac_obj <- PathAnalyzeR(mac_obj, pathway = my_pathways, meta = "Cluster")
 ```
 
-📖 The full step-by-step tutorial is in the **[vignette](https://andreeedna.github.io/projects/MACanalyzeR_Vignette/)**.
+📖 The full step-by-step tutorial is in the **[vignette](https://andreeedna.github.io/projects/)**.
 
 ## 🧰 Function overview
 
@@ -116,8 +134,6 @@ mac_obj <- PathAnalyzeR(mac_obj, pathway = my_pathways, meta = "Cluster")
 | Spectrum | `MacSpectrumIndex()` | `macSpectrum()` (`mode = "macspectrum"` or `"atherospectrum"`) |
 
 Built-in reference data include KEGG, GO and Reactome collections, the MSigDB collections for mouse and human (retrieved with `PathCreatoR()`), MitoCarta 3.0, polarization and LAM gene sets for both mouse and human, plus a human–mouse ortholog dictionary.
-
-See [NEWS.md](NEWS.md) for the changes in each version.
 
 ## 📝 Citation
 
